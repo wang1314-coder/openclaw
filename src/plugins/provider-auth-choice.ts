@@ -1,7 +1,8 @@
 import {
-  resolveDefaultAgentId,
   resolveAgentDir,
   resolveAgentWorkspaceDir,
+  resolveDefaultAgentDir,
+  resolveDefaultAgentId,
 } from "../agents/agent-scope.js";
 import { upsertAuthProfileWithLock } from "../agents/auth-profiles.js";
 import { formatLiteralProviderPrefixedModelRef } from "../agents/model-ref-shared.js";
@@ -267,8 +268,13 @@ export async function runProviderPluginAuthMethod(params: {
   allowSecretRefPrompt?: boolean;
   opts?: Partial<ProviderAuthOptionBag>;
 }): Promise<{ config: OpenClawConfig; defaultModel?: string }> {
-  const agentId = params.agentId ?? resolveDefaultAgentId(params.config);
-  const agentDir = params.agentDir ?? resolveAgentDir(params.config, agentId);
+  const agentId = params.agentId ?? resolveDefaultAgentId(params.config, params.env);
+  const defaultAgentId = resolveDefaultAgentId(params.config, params.env);
+  const agentDir =
+    params.agentDir ??
+    (agentId === defaultAgentId
+      ? resolveDefaultAgentDir(params.config, params.env)
+      : resolveAgentDir(params.config, agentId, params.env));
   const workspaceDir =
     params.workspaceDir ??
     resolveAgentWorkspaceDir(params.config, agentId) ??
@@ -515,8 +521,13 @@ export async function applyAuthChoicePluginProvider(
     return { config: nextConfig };
   }
 
-  const agentId = params.agentId ?? resolveDefaultAgentId(nextConfig);
-  const agentDir = params.agentDir ?? resolveAgentDir(nextConfig, agentId);
+  const agentId = params.agentId ?? resolveDefaultAgentId(nextConfig, params.env);
+  const defaultAgentId = resolveDefaultAgentId(nextConfig, params.env);
+  const agentDir =
+    params.agentDir ??
+    (agentId === defaultAgentId
+      ? resolveDefaultAgentDir(nextConfig, params.env)
+      : resolveAgentDir(nextConfig, agentId, params.env));
   const workspaceDir =
     resolveAgentWorkspaceDir(nextConfig, agentId) ?? resolveDefaultAgentWorkspaceDir();
 
