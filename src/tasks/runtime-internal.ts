@@ -1,3 +1,5 @@
+import { createTaskRecord as createTaskRecordInRegistry } from "./task-registry.js";
+
 export {
   cancelTaskById,
   createTaskRecord,
@@ -33,3 +35,9 @@ export {
   updateTaskNotifyPolicyById,
 } from "./task-registry.js";
 export type { TaskRecord } from "./task-registry.types.js";
+
+export function createPluginTaskRecord(
+  params: Parameters<typeof createTaskRecordInRegistry>[0],
+): ReturnType<typeof createTaskRecordInRegistry> {
+  return createTaskRecordInRegistry(params);
+}
