@@ -2,7 +2,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ChannelPlugin } from "../../channels/plugins/types.public.js";
 import type { OpenClawConfig } from "../../config/types.openclaw.js";
 import type { CronDelivery, CronJob } from "../../cron/types.js";
-import { resetPluginRuntimeStateForTest, setActivePluginRegistry } from "../../plugins/runtime.js";
+import {
+  resetPluginRuntimeStateForTest,
+  setActivePluginRegistry,
+} from "../../plugins/runtime.js";
 import {
   createChannelTestPluginBase,
   createTestRegistry,
@@ -13,8 +16,9 @@ const getRuntimeConfig = vi.hoisted(() =>
 );
 
 vi.mock("../../config/config.js", async () => {
-  const actual =
-    await vi.importActual<typeof import("../../config/config.js")>("../../config/config.js");
+  const actual = await vi.importActual<typeof import("../../config/config.js")>(
+    "../../config/config.js",
+  );
   return {
     ...actual,
     getRuntimeConfig,
@@ -54,7 +58,11 @@ function setCronValidationTestRegistry(): void {
       },
       {
         pluginId: "msteams",
-        plugin: createPrefixOnlyChannelPlugin("msteams", ["msteams", "teams"], ["teams"]),
+        plugin: createPrefixOnlyChannelPlugin(
+          "msteams",
+          ["msteams", "teams"],
+          ["teams"],
+        ),
         source: "test:msteams",
       },
       {
@@ -76,11 +84,17 @@ function createCronContext(currentJob?: CronJob) {
       add: vi.fn(async () => ({ id: "cron-1" })),
       update: vi.fn(async () => ({ id: "cron-1" })),
       remove: vi.fn(async () => ({ ok: true, removed: true })),
-      enqueueRun: vi.fn(async () => ({ ok: true, enqueued: true, runId: "run-1" })),
+      enqueueRun: vi.fn(async () => ({
+        ok: true,
+        enqueued: true,
+        runId: "run-1",
+      })),
       getDefaultAgentId: vi.fn(() => "main"),
       getJob: vi.fn(() => currentJob),
       wake: vi.fn(() => ({ ok: true }) as const),
-      readJob: vi.fn(async (id: string) => (id === currentJob?.id ? currentJob : undefined)),
+      readJob: vi.fn(async (id: string) =>
+        id === currentJob?.id ? currentJob : undefined,
+      ),
     },
     logGateway: {
       info: vi.fn(),
@@ -94,7 +108,10 @@ type CronMethod = keyof typeof cronHandlers;
 async function invokeCron(
   method: CronMethod,
   params: Record<string, unknown>,
-  options: { currentJob?: CronJob; context?: ReturnType<typeof createCronContext> } = {},
+  options: {
+    currentJob?: CronJob;
+    context?: ReturnType<typeof createCronContext>;
+  } = {},
 ) {
   const context = options.context ?? createCronContext(options.currentJob);
   const respond = vi.fn();
@@ -113,11 +130,17 @@ async function invokeCronAdd(params: Record<string, unknown>) {
   return await invokeCron("cron.add", params);
 }
 
-async function invokeCronGet(params: Record<string, unknown>, currentJob?: CronJob) {
+async function invokeCronGet(
+  params: Record<string, unknown>,
+  currentJob?: CronJob,
+) {
   return await invokeCron("cron.get", params, { currentJob });
 }
 
-async function invokeCronUpdate(params: Record<string, unknown>, currentJob?: CronJob) {
+async function invokeCronUpdate(
+  params: Record<string, unknown>,
+  currentJob?: CronJob,
+) {
   return await invokeCron("cron.update", params, { currentJob });
 }
 
@@ -166,7 +189,9 @@ function createCronJob(overrides: Partial<CronJob> = {}): CronJob {
   };
 }
 
-function telegramDeliveryWithSlackFailure(overrides: Partial<CronDelivery> = {}): CronDelivery {
+function telegramDeliveryWithSlackFailure(
+  overrides: Partial<CronDelivery> = {},
+): CronDelivery {
   return {
     mode: "announce",
     channel: "telegram",
@@ -202,7 +227,9 @@ function telegramConfig(): OpenClawConfig {
   } as OpenClawConfig;
 }
 
-function telegramSlackConfig(params: { includeMainSession?: boolean } = {}): OpenClawConfig {
+function telegramSlackConfig(
+  params: { includeMainSession?: boolean } = {},
+): OpenClawConfig {
   return {
     ...(params.includeMainSession ? { session: { mainKey: "main" } } : {}),
     channels: {
@@ -244,7 +271,9 @@ function slackSynologyConfig(): OpenClawConfig {
   } as OpenClawConfig;
 }
 
-function slackConfig(params: { includeMainSession?: boolean } = {}): OpenClawConfig {
+function slackConfig(
+  params: { includeMainSession?: boolean } = {},
+): OpenClawConfig {
   return {
     ...(params.includeMainSession ? { session: { mainKey: "main" } } : {}),
     channels: {
@@ -255,6 +284,14 @@ function slackConfig(params: { includeMainSession?: boolean } = {}): OpenClawCon
     },
     plugins: pluginEntries("slack"),
   } as OpenClawConfig;
+}
+
+function createMultiChannelConfig(): OpenClawConfig {
+  return telegramSlackConfig({ includeMainSession: true });
+}
+
+function createSingleChannelConfig(): OpenClawConfig {
+  return telegramConfig();
 }
 
 function agentTurnCronParams(overrides: Record<string, unknown> = {}) {
@@ -290,16 +327,27 @@ function requireCronAddPayload(
 function requireCronUpdatePatch(
   context: ReturnType<typeof createCronContext>,
 ): Record<string, unknown> {
-  const calls = context.cron.update.mock.calls as unknown as [unknown, unknown][];
+  const calls = context.cron.update.mock.calls as unknown as [
+    unknown,
+    unknown,
+  ][];
   return requireRecord(calls[0]?.[1], "cron.update patch");
 }
 
-function requireCronUpdateId(context: ReturnType<typeof createCronContext>): unknown {
-  const calls = context.cron.update.mock.calls as unknown as [unknown, unknown][];
+function requireCronUpdateId(
+  context: ReturnType<typeof createCronContext>,
+): unknown {
+  const calls = context.cron.update.mock.calls as unknown as [
+    unknown,
+    unknown,
+  ][];
   return calls[0]?.[0];
 }
 
-function expectDeliveryFields(payload: Record<string, unknown>, expected: Record<string, unknown>) {
+function expectDeliveryFields(
+  payload: Record<string, unknown>,
+  expected: Record<string, unknown>,
+) {
   const delivery = requireRecord(payload.delivery, "delivery");
   for (const [key, value] of Object.entries(expected)) {
     expect(delivery[key]).toBe(value);
@@ -333,8 +381,13 @@ function expectResponseError(
   }
 }
 
-function expectInvalidCronPatternError(respond: ReturnType<typeof vi.fn>): void {
-  expectResponseError(respond, { code: "INVALID_REQUEST", messageIncludes: "CronPattern" });
+function expectInvalidCronPatternError(
+  respond: ReturnType<typeof vi.fn>,
+): void {
+  expectResponseError(respond, {
+    code: "INVALID_REQUEST",
+    messageIncludes: "CronPattern",
+  });
 }
 
 describe("cron method validation", () => {
@@ -416,7 +469,11 @@ describe("cron method validation", () => {
         },
       },
       createCronJob({
-        delivery: { mode: "announce", channel: "telegram", to: "-1001234567890" },
+        delivery: {
+          mode: "announce",
+          channel: "telegram",
+          to: "-1001234567890",
+        },
       }),
     );
 
@@ -465,7 +522,10 @@ describe("cron method validation", () => {
       }),
     );
     expect(agentTurn.context.cron.add).not.toHaveBeenCalled();
-    expectResponseError(agentTurn.respond, { code: "INVALID_REQUEST", messageIncludes: "message" });
+    expectResponseError(agentTurn.respond, {
+      code: "INVALID_REQUEST",
+      messageIncludes: "message",
+    });
 
     const systemEvent = await invokeCronAdd({
       name: "blank system event",
@@ -476,7 +536,10 @@ describe("cron method validation", () => {
       payload: { kind: "systemEvent", text: "   " },
     });
     expect(systemEvent.context.cron.add).not.toHaveBeenCalled();
-    expectResponseError(systemEvent.respond, { code: "INVALID_REQUEST", messageIncludes: "text" });
+    expectResponseError(systemEvent.respond, {
+      code: "INVALID_REQUEST",
+      messageIncludes: "text",
+    });
   });
 
   it("rejects ambiguous announce delivery on add when multiple channels are configured", async () => {
@@ -490,7 +553,9 @@ describe("cron method validation", () => {
     );
 
     expect(context.cron.add).not.toHaveBeenCalled();
-    expectResponseError(respond, { messageIncludes: "delivery.channel is required" });
+    expectResponseError(respond, {
+      messageIncludes: "delivery.channel is required",
+    });
   });
 
   it("accepts provider-prefixed announce target without delivery.channel when multiple channels are configured", async () => {
@@ -545,7 +610,8 @@ describe("cron method validation", () => {
     expect(context.cron.add).not.toHaveBeenCalled();
     expectResponseError(respond, {
       code: "INVALID_REQUEST",
-      messageIncludes: "delivery.failureDestination.channel must be a non-empty string",
+      messageIncludes:
+        "delivery.failureDestination.channel must be a non-empty string",
     });
   });
 
@@ -560,13 +626,18 @@ describe("cron method validation", () => {
     );
 
     expect(context.cron.add).not.toHaveBeenCalled();
-    expectResponseError(respond, { messageIncludes: "belongs to telegram, not slack" });
+    expectResponseError(respond, {
+      messageIncludes: "belongs to telegram, not slack",
+    });
   });
 
   it("accepts provider-prefixed announce targets when delivery.channel uses a channel alias", async () => {
     setRuntimeConfig(msteamsConfig());
 
-    for (const to of ["teams:19:meeting_abc@thread.tacv2", "msteams:19:meeting_abc@thread.tacv2"]) {
+    for (const to of [
+      "teams:19:meeting_abc@thread.tacv2",
+      "msteams:19:meeting_abc@thread.tacv2",
+    ]) {
       const { context, respond } = await invokeCronAdd(
         agentTurnCronParams({
           name: `aliased announce add ${to}`,
@@ -594,7 +665,9 @@ describe("cron method validation", () => {
     );
 
     expect(context.cron.update).not.toHaveBeenCalled();
-    expectResponseError(respond, { messageIncludes: "belongs to telegram, not slack" });
+    expectResponseError(respond, {
+      messageIncludes: "belongs to telegram, not slack",
+    });
   });
 
   it("accepts completion webhook delivery patches and nullable clears", async () => {
@@ -687,7 +760,8 @@ describe("cron method validation", () => {
     expect(context.cron.update).not.toHaveBeenCalled();
     expectResponseError(respond, {
       code: "INVALID_REQUEST",
-      messageIncludes: "delivery.completionDestination.to must be a non-empty string",
+      messageIncludes:
+        "delivery.completionDestination.to must be a non-empty string",
     });
   });
 
@@ -757,21 +831,31 @@ describe("cron method validation", () => {
     const { context, respond } = await invokeCronAdd(
       agentTurnCronParams({
         name: "underscored mismatch add",
-        delivery: { mode: "announce", channel: "slack", to: "synology_chat:123" },
+        delivery: {
+          mode: "announce",
+          channel: "slack",
+          to: "synology_chat:123",
+        },
       }),
     );
 
     expect(context.cron.add).not.toHaveBeenCalled();
-    expectResponseError(respond, { messageIncludes: "belongs to synology-chat, not slack" });
+    expectResponseError(respond, {
+      messageIncludes: "belongs to synology-chat, not slack",
+    });
   });
 
   it("rejects ambiguous announce delivery on update when multiple channels are configured", async () => {
     setRuntimeConfig(telegramSlackConfig({ includeMainSession: true }));
 
-    const { context, respond } = await invokeCronUpdateDelivery({ mode: "announce" });
+    const { context, respond } = await invokeCronUpdateDelivery({
+      mode: "announce",
+    });
 
     expect(context.cron.update).not.toHaveBeenCalled();
-    expectResponseError(respond, { messageIncludes: "delivery.channel is required" });
+    expectResponseError(respond, {
+      messageIncludes: "delivery.channel is required",
+    });
   });
 
   it("loads the cron job before validating update delivery patches", async () => {
@@ -816,7 +900,9 @@ describe("cron method validation", () => {
     expect(context.cron.readJob).toHaveBeenCalledWith("cron-1");
     expect(context.cron.getJob).not.toHaveBeenCalled();
     expect(context.cron.update).not.toHaveBeenCalled();
-    expectResponseError(respond, { messageIncludes: "delivery.channel is required" });
+    expectResponseError(respond, {
+      messageIncludes: "delivery.channel is required",
+    });
   });
 
   it("does not revalidate stale delivery config for unrelated updates", async () => {
@@ -834,8 +920,438 @@ describe("cron method validation", () => {
       }),
     );
 
-    expect(context.cron.update).toHaveBeenCalledWith("cron-1", { enabled: false });
+    expect(context.cron.update).toHaveBeenCalledWith("cron-1", {
+      enabled: false,
+    });
     expect(respond).toHaveBeenCalledWith(true, { id: "cron-1" }, undefined);
+  });
+
+  it("accepts delivery.channel=last with a provider-prefixed target on add", async () => {
+    setRuntimeConfig(createMultiChannelConfig());
+
+    const { context, respond } = await invokeCronAdd({
+      name: "prefixed last channel announce add",
+      enabled: true,
+      schedule: { kind: "every", everyMs: 60_000 },
+      sessionTarget: "isolated",
+      wakeMode: "next-heartbeat",
+      payload: { kind: "agentTurn", message: "hello" },
+      delivery: { mode: "announce", channel: "last", to: "telegram:123" },
+    });
+
+    expect(context.cron.add).toHaveBeenCalled();
+    expect(respond).toHaveBeenCalledWith(true, { id: "cron-1" }, undefined);
+  });
+
+  it("accepts delivery.channel=last with a provider-prefixed target on update", async () => {
+    setRuntimeConfig(createMultiChannelConfig());
+
+    const { context, respond } = await invokeCronUpdate(
+      {
+        id: "cron-1",
+        patch: {
+          delivery: { mode: "announce", channel: "last", to: "telegram:123" },
+        },
+      },
+      createCronJob({
+        delivery: { mode: "announce", channel: "telegram", to: "123" },
+      }),
+    );
+
+    expect(context.cron.update).toHaveBeenCalled();
+    expect(respond).toHaveBeenCalledWith(true, { id: "cron-1" }, undefined);
+  });
+
+  it("accepts delivery.failureDestination.channel=last with a provider-prefixed target on add", async () => {
+    setRuntimeConfig(createMultiChannelConfig());
+
+    const { context, respond } = await invokeCronAdd({
+      name: "prefixed last failure destination channel add",
+      enabled: true,
+      schedule: { kind: "every", everyMs: 60_000 },
+      sessionTarget: "isolated",
+      wakeMode: "next-heartbeat",
+      payload: { kind: "agentTurn", message: "hello" },
+      delivery: {
+        mode: "announce",
+        channel: "telegram",
+        to: "123",
+        failureDestination: {
+          mode: "announce",
+          channel: "last",
+          to: "slack:ops",
+        },
+      },
+    });
+
+    expect(context.cron.add).toHaveBeenCalled();
+    expect(respond).toHaveBeenCalledWith(true, { id: "cron-1" }, undefined);
+  });
+
+  it("accepts delivery.failureDestination.mode=webhook on add when multiple channels are configured", async () => {
+    setRuntimeConfig(createMultiChannelConfig());
+
+    const { context, respond } = await invokeCronAdd({
+      name: "failure destination webhook add",
+      enabled: true,
+      schedule: { kind: "every", everyMs: 60_000 },
+      sessionTarget: "isolated",
+      wakeMode: "next-heartbeat",
+      payload: { kind: "agentTurn", message: "hello" },
+      delivery: {
+        mode: "announce",
+        channel: "telegram",
+        to: "123",
+        failureDestination: {
+          mode: "webhook",
+          to: "https://example.invalid/cron-failed",
+        },
+      },
+    });
+
+    expect(context.cron.add).toHaveBeenCalled();
+    expect(respond).toHaveBeenCalledWith(true, { id: "cron-1" }, undefined);
+  });
+
+  it("accepts delivery.failureDestination.to=last when failureDestination.channel is explicit", async () => {
+    setRuntimeConfig(createMultiChannelConfig());
+
+    const { context, respond } = await invokeCronAdd({
+      name: "explicit failure destination target named last add",
+      enabled: true,
+      schedule: { kind: "every", everyMs: 60_000 },
+      sessionTarget: "isolated",
+      wakeMode: "next-heartbeat",
+      payload: { kind: "agentTurn", message: "hello" },
+      delivery: {
+        mode: "announce",
+        channel: "telegram",
+        to: "123",
+        failureDestination: { mode: "announce", channel: "slack", to: "last" },
+      },
+    });
+
+    expect(context.cron.add).toHaveBeenCalled();
+    expect(respond).toHaveBeenCalledWith(true, { id: "cron-1" }, undefined);
+  });
+
+  it("accepts delivery.mode=none on add when multiple channels are configured", async () => {
+    setRuntimeConfig(createMultiChannelConfig());
+
+    const { context, respond } = await invokeCronAdd({
+      name: "silent add",
+      enabled: true,
+      schedule: { kind: "every", everyMs: 60_000 },
+      sessionTarget: "isolated",
+      wakeMode: "next-heartbeat",
+      payload: { kind: "agentTurn", message: "hello" },
+      delivery: { mode: "none" },
+    });
+
+    expect(context.cron.add).toHaveBeenCalled();
+    expect(respond).toHaveBeenCalledWith(true, { id: "cron-1" }, undefined);
+  });
+
+  it("accepts delivery.to=last when delivery.channel is explicit", async () => {
+    setRuntimeConfig(createMultiChannelConfig());
+
+    const { context, respond } = await invokeCronAdd({
+      name: "explicit channel target named last add",
+      enabled: true,
+      schedule: { kind: "every", everyMs: 60_000 },
+      sessionTarget: "isolated",
+      wakeMode: "next-heartbeat",
+      payload: { kind: "agentTurn", message: "hello" },
+      delivery: { mode: "announce", channel: "telegram", to: "last" },
+    });
+
+    expect(context.cron.add).toHaveBeenCalled();
+    expect(respond).toHaveBeenCalledWith(true, { id: "cron-1" }, undefined);
+  });
+
+  it("accepts enabled=false patches that disable legacy implicit isolated agentTurn delivery", async () => {
+    setRuntimeConfig(createMultiChannelConfig());
+
+    const { context, respond } = await invokeCronUpdate(
+      {
+        id: "cron-1",
+        patch: {
+          enabled: false,
+        },
+      },
+      createCronJob({
+        enabled: true,
+        delivery: undefined,
+      }),
+    );
+
+    expect(context.cron.update).toHaveBeenCalled();
+    expect(respond).toHaveBeenCalledWith(true, { id: "cron-1" }, undefined);
+  });
+
+  it("accepts enabled=true patches with provider-prefixed deterministic announce delivery", async () => {
+    setRuntimeConfig(createMultiChannelConfig());
+
+    const { context, respond } = await invokeCronUpdate(
+      {
+        id: "cron-1",
+        patch: {
+          enabled: true,
+          delivery: { mode: "announce", channel: "last", to: "telegram:123" },
+        },
+      },
+      createCronJob({
+        enabled: false,
+        delivery: undefined,
+      }),
+    );
+
+    expect(context.cron.update).toHaveBeenCalled();
+    expect(respond).toHaveBeenCalledWith(true, { id: "cron-1" }, undefined);
+  });
+
+  it("accepts failureDestination.channel=last with a provider-prefixed target on update", async () => {
+    setRuntimeConfig(createMultiChannelConfig());
+
+    const { context, respond } = await invokeCronUpdate(
+      {
+        id: "cron-1",
+        patch: {
+          delivery: {
+            failureDestination: {
+              mode: "announce",
+              channel: "last",
+              to: "slack:ops",
+            },
+          },
+        },
+      },
+      createCronJob({
+        delivery: { mode: "announce", channel: "telegram", to: "123" },
+      }),
+    );
+
+    expect(context.cron.update).toHaveBeenCalled();
+    expect(respond).toHaveBeenCalledWith(true, { id: "cron-1" }, undefined);
+  });
+
+  it("accepts failureDestination.to=last on update when failureDestination.channel is explicit", async () => {
+    setRuntimeConfig(createMultiChannelConfig());
+
+    const { context, respond } = await invokeCronUpdate(
+      {
+        id: "cron-1",
+        patch: {
+          delivery: {
+            failureDestination: {
+              mode: "announce",
+              channel: "slack",
+              to: "last",
+            },
+          },
+        },
+      },
+      createCronJob({
+        delivery: { mode: "announce", channel: "telegram", to: "123" },
+      }),
+    );
+
+    expect(context.cron.update).toHaveBeenCalled();
+    expect(respond).toHaveBeenCalledWith(true, { id: "cron-1" }, undefined);
+  });
+
+  it("preserves single-channel last-route announce compatibility", async () => {
+    setRuntimeConfig(createSingleChannelConfig());
+
+    const { context, respond } = await invokeCronAdd({
+      name: "single channel last add",
+      enabled: true,
+      schedule: { kind: "every", everyMs: 60_000 },
+      sessionTarget: "isolated",
+      wakeMode: "next-heartbeat",
+      payload: { kind: "agentTurn", message: "hello" },
+      delivery: { mode: "announce", channel: "last", to: "last" },
+    });
+
+    expect(context.cron.add).toHaveBeenCalled();
+    expect(respond).toHaveBeenCalledWith(true, { id: "cron-1" }, undefined);
+  });
+
+  it("rejects delivery.channel=last without a provider-prefixed target on add", async () => {
+    setRuntimeConfig(createMultiChannelConfig());
+
+    const { context, respond } = await invokeCronAdd({
+      name: "last channel announce add",
+      enabled: true,
+      schedule: { kind: "every", everyMs: 60_000 },
+      sessionTarget: "isolated",
+      wakeMode: "next-heartbeat",
+      payload: { kind: "agentTurn", message: "hello" },
+      delivery: { mode: "announce", channel: "last", to: "123" },
+    });
+
+    expect(context.cron.add).not.toHaveBeenCalled();
+    expectResponseError(respond, {
+      messageIncludes: "cannot use implicit last routing",
+    });
+  });
+
+  it("rejects delivery.failureDestination.channel=last without a provider-prefixed target on add", async () => {
+    setRuntimeConfig(createMultiChannelConfig());
+
+    const { context, respond } = await invokeCronAdd({
+      name: "last failure destination channel add",
+      enabled: true,
+      schedule: { kind: "every", everyMs: 60_000 },
+      sessionTarget: "isolated",
+      wakeMode: "next-heartbeat",
+      payload: { kind: "agentTurn", message: "hello" },
+      delivery: {
+        mode: "announce",
+        channel: "telegram",
+        to: "123",
+        failureDestination: { mode: "announce", channel: "last", to: "ops" },
+      },
+    });
+
+    expect(context.cron.add).not.toHaveBeenCalled();
+    expectResponseError(respond, {
+      messageIncludes: "cannot use implicit last routing",
+    });
+  });
+
+  it("rejects delivery.failureDestination.to=last without a deterministic channel on add", async () => {
+    setRuntimeConfig(createMultiChannelConfig());
+
+    const { context, respond } = await invokeCronAdd({
+      name: "last failure destination target add",
+      enabled: true,
+      schedule: { kind: "every", everyMs: 60_000 },
+      sessionTarget: "isolated",
+      wakeMode: "next-heartbeat",
+      payload: { kind: "agentTurn", message: "hello" },
+      delivery: {
+        mode: "announce",
+        channel: "telegram",
+        to: "123",
+        failureDestination: { mode: "announce", to: "last" },
+      },
+    });
+
+    expect(context.cron.add).not.toHaveBeenCalled();
+    expectResponseError(respond, {
+      messageIncludes: "cannot use implicit last routing",
+    });
+  });
+
+  it("rejects delivery.to=last without a deterministic channel on add when multiple channels are configured", async () => {
+    setRuntimeConfig(createMultiChannelConfig());
+
+    const { context, respond } = await invokeCronAdd({
+      name: "last target announce add",
+      enabled: true,
+      schedule: { kind: "every", everyMs: 60_000 },
+      sessionTarget: "isolated",
+      wakeMode: "next-heartbeat",
+      payload: { kind: "agentTurn", message: "hello" },
+      delivery: { mode: "announce", to: "last" },
+    });
+
+    expect(context.cron.add).not.toHaveBeenCalled();
+    expectResponseError(respond, {
+      messageIncludes: "cannot use implicit last routing",
+    });
+  });
+
+  it("rejects enabled=true patches that would activate implicit isolated agentTurn announce delivery", async () => {
+    setRuntimeConfig(createMultiChannelConfig());
+
+    const { context, respond } = await invokeCronUpdate(
+      {
+        id: "cron-1",
+        patch: {
+          enabled: true,
+        },
+      },
+      createCronJob({
+        enabled: false,
+        delivery: undefined,
+      }),
+    );
+
+    expect(context.cron.update).not.toHaveBeenCalled();
+    expectResponseError(respond, {
+      messageIncludes: "cannot use implicit last routing",
+    });
+  });
+
+  it("rejects failureDestination.channel=last without a provider-prefixed target on update", async () => {
+    setRuntimeConfig(createMultiChannelConfig());
+
+    const { context, respond } = await invokeCronUpdate(
+      {
+        id: "cron-1",
+        patch: {
+          delivery: {
+            failureDestination: {
+              mode: "announce",
+              channel: "last",
+              to: "ops",
+            },
+          },
+        },
+      },
+      createCronJob({
+        delivery: { mode: "announce", channel: "telegram", to: "123" },
+      }),
+    );
+
+    expect(context.cron.update).not.toHaveBeenCalled();
+    expectResponseError(respond, {
+      messageIncludes: "cannot use implicit last routing",
+    });
+  });
+
+  it("rejects omitted isolated agentTurn delivery on add when multiple channels are configured", async () => {
+    setRuntimeConfig(createMultiChannelConfig());
+
+    const { context, respond } = await invokeCronAdd({
+      name: "implicit announce add",
+      enabled: true,
+      schedule: { kind: "every", everyMs: 60_000 },
+      sessionTarget: "isolated",
+      wakeMode: "next-heartbeat",
+      payload: { kind: "agentTurn", message: "hello" },
+    });
+
+    expect(context.cron.add).not.toHaveBeenCalled();
+    expectResponseError(respond, {
+      messageIncludes: "cannot use implicit last routing",
+    });
+  });
+
+  it("rejects update patches that would create implicit isolated agentTurn announce delivery", async () => {
+    setRuntimeConfig(createMultiChannelConfig());
+
+    const { context, respond } = await invokeCronUpdate(
+      {
+        id: "cron-1",
+        patch: {
+          sessionTarget: "isolated",
+          payload: { kind: "agentTurn", message: "hello" },
+        },
+      },
+      createCronJob({
+        sessionTarget: "main",
+        payload: { kind: "systemEvent", text: "hello" },
+        delivery: undefined,
+      }),
+    );
+
+    expect(context.cron.update).not.toHaveBeenCalled();
+    expectResponseError(respond, {
+      messageIncludes: "cannot use implicit last routing",
+    });
   });
 
   it("rejects target ids mistakenly supplied as delivery.channel providers", async () => {
@@ -853,12 +1369,16 @@ describe("cron method validation", () => {
     );
 
     expect(context.cron.add).not.toHaveBeenCalled();
-    expectResponseError(respond, { messageIncludes: "delivery.channel must be one of: slack" });
+    expectResponseError(respond, {
+      messageIncludes: "delivery.channel must be one of: slack",
+    });
   });
 
   it("returns INVALID_REQUEST when cron.add throws a croner parse error (#74066)", async () => {
     const context = createCronContext();
-    context.cron.add.mockRejectedValueOnce(new TypeError("CronPattern: Expected 5 or 6 fields"));
+    context.cron.add.mockRejectedValueOnce(
+      new TypeError("CronPattern: Expected 5 or 6 fields"),
+    );
     const { respond } = await invokeCron(
       "cron.add",
       {
@@ -952,14 +1472,21 @@ describe("cron method validation", () => {
     expect(context.cron.update).not.toHaveBeenCalled();
     expectResponseError(respond, {
       code: "INVALID_REQUEST",
-      messageIncludes: 'isolated/current/session cron jobs require payload.kind="agentTurn"',
+      messageIncludes:
+        'isolated/current/session cron jobs require payload.kind="agentTurn"',
     });
   });
 
   it("returns INVALID_REQUEST when cron.run cannot find the job", async () => {
     const context = createCronContext();
-    context.cron.enqueueRun.mockRejectedValueOnce(new Error("unknown cron job id: missing"));
-    const { respond } = await invokeCron("cron.run", { id: "missing" }, { context });
+    context.cron.enqueueRun.mockRejectedValueOnce(
+      new Error("unknown cron job id: missing"),
+    );
+    const { respond } = await invokeCron(
+      "cron.run",
+      { id: "missing" },
+      { context },
+    );
 
     expectResponseError(respond, {
       code: "INVALID_REQUEST",
@@ -1028,7 +1555,10 @@ describe("cron method validation", () => {
         sessionKey,
       });
       expect(context.cron.wake).not.toHaveBeenCalled();
-      expectResponseError(respond, { code: "INVALID_REQUEST", messageIncludes: "sessionKey" });
+      expectResponseError(respond, {
+        code: "INVALID_REQUEST",
+        messageIncludes: "sessionKey",
+      });
     });
 
     it("treats whitespace-only sessionKey as omitted at the handler boundary", async () => {
