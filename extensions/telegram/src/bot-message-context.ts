@@ -116,6 +116,7 @@ export type TelegramMessageContext = {
   removeAckAfterReply: boolean;
   statusReactionController: TelegramStatusReactionController | null;
   accountId: string;
+  suppressSilentReplyFallback: boolean;
 };
 
 export const buildTelegramMessageContext = async ({
@@ -661,5 +662,6 @@ export const buildTelegramMessageContext = async ({
     removeAckAfterReply,
     statusReactionController,
     accountId: account.accountId,
+    suppressSilentReplyFallback: options?.suppressSilentReplyFallback === true,
   };
 };
