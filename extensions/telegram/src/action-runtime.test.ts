@@ -171,6 +171,7 @@ const createForumTopicTelegram = vi.fn(async () => ({
   chatId: "123",
 }));
 let envSnapshot: ReturnType<typeof captureEnv>;
+let stateDir: string;
 
 type TopicNameEntryForTest = {
   name: string;
@@ -310,6 +311,7 @@ describe("handleTelegramAction", () => {
 
   beforeEach(() => {
     envSnapshot = captureEnv(["OPENCLAW_STATE_DIR", "TELEGRAM_BOT_TOKEN"]);
+    stateDir = fs.mkdtempSync(path.join(os.tmpdir(), "openclaw-telegram-action-"));
     resetTopicNameCacheForTest();
     installTopicNameStoreForTest();
     Object.assign(telegramActionRuntime, originalTelegramActionRuntime, {
@@ -335,6 +337,7 @@ describe("handleTelegramAction", () => {
     pinMessageTelegram.mockClear();
     createForumTopicTelegram.mockClear();
     process.env.TELEGRAM_BOT_TOKEN = "tok";
+    process.env.OPENCLAW_STATE_DIR = stateDir;
   });
 
   afterEach(() => {
@@ -342,6 +345,7 @@ describe("handleTelegramAction", () => {
     resetTopicNameCacheForTest();
     topicNameStoresForTest.clear();
     envSnapshot.restore();
+    fs.rmSync(stateDir, { recursive: true, force: true });
   });
 
   it("adds reactions when reactionLevel is minimal", async () => {
@@ -1053,6 +1057,19 @@ describe("handleTelegramAction", () => {
     expect(details.messageId).toBe("790");
     expect(details.chatId).toBe("123");
     expect(details.pollId).toBe("poll-1");
+
+    const registryPath = path.join(stateDir, "telegram", "poll-registry-default.json");
+    const registry = JSON.parse(fs.readFileSync(registryPath, "utf-8")) as {
+      polls: Array<{ pollId: string; chatId: string; question: string; options: string[] }>;
+    };
+    expect(registry.polls).toContainEqual(
+      expect.objectContaining({
+        pollId: "poll-1",
+        chatId: "123",
+        question: "Ready?",
+        options: ["Yes", "No"],
+      }),
+    );
   });
 
   it("rejects fractional poll durations before sending", async () => {
@@ -1102,6 +1119,17 @@ describe("handleTelegramAction", () => {
     expect(options.replyToMessageId).toBe(55);
     expect(options.messageThreadId).toBe(77);
     expect(options.silent).toBe(true);
+
+    const registryPath = path.join(stateDir, "telegram", "poll-registry-default.json");
+    const registry = JSON.parse(fs.readFileSync(registryPath, "utf-8")) as {
+      polls: Array<{ pollId: string; messageThreadId?: number }>;
+    };
+    expect(registry.polls).toContainEqual(
+      expect.objectContaining({
+        pollId: "poll-1",
+        messageThreadId: 77,
+      }),
+    );
   });
 
   it("parses string booleans for poll flags", async () => {
