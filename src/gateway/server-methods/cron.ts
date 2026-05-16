@@ -15,10 +15,7 @@ import {
 import type { OpenClawConfig } from "../../config/types.openclaw.js";
 import { resolveCronDeliveryPreviews } from "../../cron/delivery-preview.js";
 import { assertCronDeliveryInputNonBlankFields } from "../../cron/delivery-target-validation.js";
-import {
-  normalizeCronJobCreate,
-  normalizeCronJobPatch,
-} from "../../cron/normalize.js";
+import { normalizeCronJobCreate, normalizeCronJobPatch } from "../../cron/normalize.js";
 import {
   isInvalidCronRunLogJobIdError,
   readCronRunLogEntriesPage,
@@ -53,9 +50,7 @@ type CronRunsRequestParams = CronJobIdParams & {
   offset?: number;
   statuses?: Array<"ok" | "error" | "skipped">;
   status?: "all" | "ok" | "error" | "skipped";
-  deliveryStatuses?: Array<
-    "delivered" | "not-delivered" | "unknown" | "not-requested"
-  >;
+  deliveryStatuses?: Array<"delivered" | "not-delivered" | "unknown" | "not-requested">;
   deliveryStatus?: "delivered" | "not-delivered" | "unknown" | "not-requested";
   query?: string;
   sortDir?: "asc" | "desc";
@@ -68,19 +63,14 @@ function listConfiguredAnnounceChannelIds(cfg: OpenClawConfig): string[] {
   });
 }
 
-type CronAnnounceDeliveryField =
-  | "delivery.channel"
-  | "delivery.failureDestination.channel";
+type CronAnnounceDeliveryField = "delivery.channel" | "delivery.failureDestination.channel";
 
 function isImplicitLastRouteValue(value: unknown): boolean {
   return typeof value === "string" && value.trim().toLowerCase() === "last";
 }
 
-function formatDeterministicAnnounceRouteError(
-  field: CronAnnounceDeliveryField,
-): string {
-  const target =
-    field === "delivery.channel" ? "delivery" : "delivery.failureDestination";
+function formatDeterministicAnnounceRouteError(field: CronAnnounceDeliveryField): string {
+  const target = field === "delivery.channel" ? "delivery" : "delivery.failureDestination";
   const modeHint =
     target === "delivery"
       ? 'or set delivery.mode="none"'
@@ -102,8 +92,8 @@ function assertNoImplicitLastAnnounceRoute(params: {
     Boolean(normalizedChannel && normalizedChannel !== "last") ||
     Boolean(resolveTargetPrefixedChannel(params.to));
   if (
-    isImplicitLastRouteValue(params.channel) ||
-    (!hasDeterministicChannel && isImplicitLastRouteValue(params.to))
+    !hasDeterministicChannel &&
+    (isImplicitLastRouteValue(params.channel) || isImplicitLastRouteValue(params.to))
   ) {
     throw new Error(formatDeterministicAnnounceRouteError(params.field));
   }
@@ -114,9 +104,7 @@ function assertConfiguredAnnounceChannel(params: {
   channel?: string;
   field: CronAnnounceDeliveryField;
 }) {
-  const configuredChannels = listConfiguredAnnounceChannelIds(
-    params.cfg,
-  ).toSorted();
+  const configuredChannels = listConfiguredAnnounceChannelIds(params.cfg).toSorted();
   const normalizedChannel = normalizeMessageChannel(params.channel);
   if (normalizedChannel === "last" && configuredChannels.length <= 1) {
     return;
@@ -136,9 +124,7 @@ function assertConfiguredAnnounceChannel(params: {
     return;
   }
 
-  throw new Error(
-    `${params.field} must be one of: ${configuredChannels.join(", ")}`,
-  );
+  throw new Error(`${params.field} must be one of: ${configuredChannels.join(", ")}`);
 }
 
 function resolveAnnounceValidationChannel(params: {
@@ -232,10 +218,7 @@ function assertValidCronAnnounceDelivery(params: {
   }
 
   const failureDestination = params.delivery?.failureDestination;
-  if (
-    failureDestination &&
-    (failureDestination.mode ?? "announce") === "announce"
-  ) {
+  if (failureDestination && (failureDestination.mode ?? "announce") === "announce") {
     if (
       failureDestination.channel === undefined &&
       failureDestination.to === undefined &&
@@ -266,10 +249,7 @@ function assertValidCronAnnounceDelivery(params: {
   }
 }
 
-function assertValidCronCreateDelivery(
-  cfg: OpenClawConfig,
-  jobCreate: CronJobCreate,
-) {
+function assertValidCronCreateDelivery(cfg: OpenClawConfig, jobCreate: CronJobCreate) {
   assertValidCronAnnounceDelivery({
     cfg,
     delivery: jobCreate.delivery,
@@ -313,18 +293,11 @@ function resolveCronJobId(params: CronJobIdParams): string | undefined {
   return params.id ?? params.jobId;
 }
 
-function respondInvalidCronParams(
-  respond: RespondFn,
-  method: string,
-  reason: string,
-): void {
+function respondInvalidCronParams(respond: RespondFn, method: string, reason: string): void {
   respond(
     false,
     undefined,
-    errorShape(
-      ErrorCodes.INVALID_REQUEST,
-      `invalid ${method} params: ${reason}`,
-    ),
+    errorShape(ErrorCodes.INVALID_REQUEST, `invalid ${method} params: ${reason}`),
   );
 }
 
@@ -353,12 +326,8 @@ function isCronInvalidRequestError(err: unknown): boolean {
     message.includes("cron job is missing sessionTarget") ||
     message.includes("invalid cron sessionTarget session id") ||
     message.includes('main cron jobs require payload.kind="systemEvent"') ||
-    message.includes(
-      'isolated/current/session cron jobs require payload.kind="agentTurn"',
-    ) ||
-    message.includes(
-      'sessionTarget "main" is only valid for the default agent',
-    ) ||
+    message.includes('isolated/current/session cron jobs require payload.kind="agentTurn"') ||
+    message.includes('sessionTarget "main" is only valid for the default agent') ||
     message.includes('cron.update payload.kind="systemEvent" requires text') ||
     message.includes('cron.update payload.kind="agentTurn" requires message') ||
     message.includes("cron webhook delivery requires") ||
@@ -394,10 +363,7 @@ export const cronHandlers: GatewayRequestHandlers = {
       respond(
         false,
         undefined,
-        errorShape(
-          ErrorCodes.INVALID_REQUEST,
-          "wake sessionKey cannot target a subagent session",
-        ),
+        errorShape(ErrorCodes.INVALID_REQUEST, "wake sessionKey cannot target a subagent session"),
       );
       return;
     }
@@ -493,15 +459,12 @@ export const cronHandlers: GatewayRequestHandlers = {
   },
   "cron.add": async ({ params, respond, context }) => {
     const sessionKey =
-      typeof (params as { sessionKey?: unknown } | null)?.sessionKey ===
-      "string"
+      typeof (params as { sessionKey?: unknown } | null)?.sessionKey === "string"
         ? (params as { sessionKey: string }).sessionKey
         : undefined;
     let normalized: unknown;
     try {
-      assertCronDeliveryInputNonBlankFields(
-        (params as { delivery?: unknown } | null)?.delivery,
-      );
+      assertCronDeliveryInputNonBlankFields((params as { delivery?: unknown } | null)?.delivery);
       normalized =
         normalizeCronJobCreate(params, {
           sessionContext: { sessionKey },
@@ -625,10 +588,7 @@ export const cronHandlers: GatewayRequestHandlers = {
       respond(
         false,
         undefined,
-        errorShape(
-          ErrorCodes.INVALID_REQUEST,
-          "invalid cron.update params: missing id",
-        ),
+        errorShape(ErrorCodes.INVALID_REQUEST, "invalid cron.update params: missing id"),
       );
       return;
     }
@@ -711,10 +671,7 @@ export const cronHandlers: GatewayRequestHandlers = {
       respond(
         false,
         undefined,
-        errorShape(
-          ErrorCodes.INVALID_REQUEST,
-          "invalid cron.remove params: id not found",
-        ),
+        errorShape(ErrorCodes.INVALID_REQUEST, "invalid cron.remove params: id not found"),
       );
       return;
     }
@@ -741,19 +698,11 @@ export const cronHandlers: GatewayRequestHandlers = {
       result = await context.cron.enqueueRun(jobId, p.mode ?? "force");
     } catch (error) {
       if (isInvalidCronSessionTargetIdError(error)) {
-        respond(
-          true,
-          { ok: true, ran: false, reason: "invalid-spec" },
-          undefined,
-        );
+        respond(true, { ok: true, ran: false, reason: "invalid-spec" }, undefined);
         return;
       }
       if (isCronInvalidRequestError(error)) {
-        respondInvalidCronParams(
-          respond,
-          "cron.run",
-          formatErrorMessage(error),
-        );
+        respondInvalidCronParams(respond, "cron.run", formatErrorMessage(error));
         return;
       }
       throw error;
@@ -781,9 +730,7 @@ export const cronHandlers: GatewayRequestHandlers = {
       const jobs = await context.cron.list({ includeDisabled: true });
       const jobNameById = Object.fromEntries(
         jobs
-          .filter(
-            (job) => typeof job.id === "string" && typeof job.name === "string",
-          )
+          .filter((job) => typeof job.id === "string" && typeof job.name === "string")
           .map((job) => [job.id, job.name]),
       );
       const page = await readCronRunLogEntriesPageAll({
@@ -815,10 +762,7 @@ export const cronHandlers: GatewayRequestHandlers = {
       respond(
         false,
         undefined,
-        errorShape(
-          ErrorCodes.INVALID_REQUEST,
-          "invalid cron.runs params: invalid id",
-        ),
+        errorShape(ErrorCodes.INVALID_REQUEST, "invalid cron.runs params: invalid id"),
       );
     }
   },

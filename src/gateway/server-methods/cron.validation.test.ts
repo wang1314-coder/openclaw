@@ -2,10 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ChannelPlugin } from "../../channels/plugins/types.public.js";
 import type { OpenClawConfig } from "../../config/types.openclaw.js";
 import type { CronDelivery, CronJob } from "../../cron/types.js";
-import {
-  resetPluginRuntimeStateForTest,
-  setActivePluginRegistry,
-} from "../../plugins/runtime.js";
+import { resetPluginRuntimeStateForTest, setActivePluginRegistry } from "../../plugins/runtime.js";
 import {
   createChannelTestPluginBase,
   createTestRegistry,
@@ -16,9 +13,8 @@ const getRuntimeConfig = vi.hoisted(() =>
 );
 
 vi.mock("../../config/config.js", async () => {
-  const actual = await vi.importActual<typeof import("../../config/config.js")>(
-    "../../config/config.js",
-  );
+  const actual =
+    await vi.importActual<typeof import("../../config/config.js")>("../../config/config.js");
   return {
     ...actual,
     getRuntimeConfig,
@@ -58,11 +54,7 @@ function setCronValidationTestRegistry(): void {
       },
       {
         pluginId: "msteams",
-        plugin: createPrefixOnlyChannelPlugin(
-          "msteams",
-          ["msteams", "teams"],
-          ["teams"],
-        ),
+        plugin: createPrefixOnlyChannelPlugin("msteams", ["msteams", "teams"], ["teams"]),
         source: "test:msteams",
       },
       {
@@ -92,9 +84,7 @@ function createCronContext(currentJob?: CronJob) {
       getDefaultAgentId: vi.fn(() => "main"),
       getJob: vi.fn(() => currentJob),
       wake: vi.fn(() => ({ ok: true }) as const),
-      readJob: vi.fn(async (id: string) =>
-        id === currentJob?.id ? currentJob : undefined,
-      ),
+      readJob: vi.fn(async (id: string) => (id === currentJob?.id ? currentJob : undefined)),
     },
     logGateway: {
       info: vi.fn(),
@@ -130,17 +120,11 @@ async function invokeCronAdd(params: Record<string, unknown>) {
   return await invokeCron("cron.add", params);
 }
 
-async function invokeCronGet(
-  params: Record<string, unknown>,
-  currentJob?: CronJob,
-) {
+async function invokeCronGet(params: Record<string, unknown>, currentJob?: CronJob) {
   return await invokeCron("cron.get", params, { currentJob });
 }
 
-async function invokeCronUpdate(
-  params: Record<string, unknown>,
-  currentJob?: CronJob,
-) {
+async function invokeCronUpdate(params: Record<string, unknown>, currentJob?: CronJob) {
   return await invokeCron("cron.update", params, { currentJob });
 }
 
@@ -189,9 +173,7 @@ function createCronJob(overrides: Partial<CronJob> = {}): CronJob {
   };
 }
 
-function telegramDeliveryWithSlackFailure(
-  overrides: Partial<CronDelivery> = {},
-): CronDelivery {
+function telegramDeliveryWithSlackFailure(overrides: Partial<CronDelivery> = {}): CronDelivery {
   return {
     mode: "announce",
     channel: "telegram",
@@ -227,9 +209,7 @@ function telegramConfig(): OpenClawConfig {
   } as OpenClawConfig;
 }
 
-function telegramSlackConfig(
-  params: { includeMainSession?: boolean } = {},
-): OpenClawConfig {
+function telegramSlackConfig(params: { includeMainSession?: boolean } = {}): OpenClawConfig {
   return {
     ...(params.includeMainSession ? { session: { mainKey: "main" } } : {}),
     channels: {
@@ -271,9 +251,7 @@ function slackSynologyConfig(): OpenClawConfig {
   } as OpenClawConfig;
 }
 
-function slackConfig(
-  params: { includeMainSession?: boolean } = {},
-): OpenClawConfig {
+function slackConfig(params: { includeMainSession?: boolean } = {}): OpenClawConfig {
   return {
     ...(params.includeMainSession ? { session: { mainKey: "main" } } : {}),
     channels: {
@@ -327,27 +305,16 @@ function requireCronAddPayload(
 function requireCronUpdatePatch(
   context: ReturnType<typeof createCronContext>,
 ): Record<string, unknown> {
-  const calls = context.cron.update.mock.calls as unknown as [
-    unknown,
-    unknown,
-  ][];
+  const calls = context.cron.update.mock.calls as unknown as [unknown, unknown][];
   return requireRecord(calls[0]?.[1], "cron.update patch");
 }
 
-function requireCronUpdateId(
-  context: ReturnType<typeof createCronContext>,
-): unknown {
-  const calls = context.cron.update.mock.calls as unknown as [
-    unknown,
-    unknown,
-  ][];
+function requireCronUpdateId(context: ReturnType<typeof createCronContext>): unknown {
+  const calls = context.cron.update.mock.calls as unknown as [unknown, unknown][];
   return calls[0]?.[0];
 }
 
-function expectDeliveryFields(
-  payload: Record<string, unknown>,
-  expected: Record<string, unknown>,
-) {
+function expectDeliveryFields(payload: Record<string, unknown>, expected: Record<string, unknown>) {
   const delivery = requireRecord(payload.delivery, "delivery");
   for (const [key, value] of Object.entries(expected)) {
     expect(delivery[key]).toBe(value);
@@ -381,9 +348,7 @@ function expectResponseError(
   }
 }
 
-function expectInvalidCronPatternError(
-  respond: ReturnType<typeof vi.fn>,
-): void {
+function expectInvalidCronPatternError(respond: ReturnType<typeof vi.fn>): void {
   expectResponseError(respond, {
     code: "INVALID_REQUEST",
     messageIncludes: "CronPattern",
@@ -554,7 +519,7 @@ describe("cron method validation", () => {
 
     expect(context.cron.add).not.toHaveBeenCalled();
     expectResponseError(respond, {
-      messageIncludes: "delivery.channel is required",
+      messageIncludes: "cannot use implicit last routing",
     });
   });
 
@@ -610,8 +575,7 @@ describe("cron method validation", () => {
     expect(context.cron.add).not.toHaveBeenCalled();
     expectResponseError(respond, {
       code: "INVALID_REQUEST",
-      messageIncludes:
-        "delivery.failureDestination.channel must be a non-empty string",
+      messageIncludes: "delivery.failureDestination.channel must be a non-empty string",
     });
   });
 
@@ -634,10 +598,7 @@ describe("cron method validation", () => {
   it("accepts provider-prefixed announce targets when delivery.channel uses a channel alias", async () => {
     setRuntimeConfig(msteamsConfig());
 
-    for (const to of [
-      "teams:19:meeting_abc@thread.tacv2",
-      "msteams:19:meeting_abc@thread.tacv2",
-    ]) {
+    for (const to of ["teams:19:meeting_abc@thread.tacv2", "msteams:19:meeting_abc@thread.tacv2"]) {
       const { context, respond } = await invokeCronAdd(
         agentTurnCronParams({
           name: `aliased announce add ${to}`,
@@ -760,8 +721,7 @@ describe("cron method validation", () => {
     expect(context.cron.update).not.toHaveBeenCalled();
     expectResponseError(respond, {
       code: "INVALID_REQUEST",
-      messageIncludes:
-        "delivery.completionDestination.to must be a non-empty string",
+      messageIncludes: "delivery.completionDestination.to must be a non-empty string",
     });
   });
 
@@ -854,7 +814,7 @@ describe("cron method validation", () => {
 
     expect(context.cron.update).not.toHaveBeenCalled();
     expectResponseError(respond, {
-      messageIncludes: "delivery.channel is required",
+      messageIncludes: "cannot use implicit last routing",
     });
   });
 
@@ -901,7 +861,7 @@ describe("cron method validation", () => {
     expect(context.cron.getJob).not.toHaveBeenCalled();
     expect(context.cron.update).not.toHaveBeenCalled();
     expectResponseError(respond, {
-      messageIncludes: "delivery.channel is required",
+      messageIncludes: "cannot use implicit last routing",
     });
   });
 
@@ -1376,9 +1336,7 @@ describe("cron method validation", () => {
 
   it("returns INVALID_REQUEST when cron.add throws a croner parse error (#74066)", async () => {
     const context = createCronContext();
-    context.cron.add.mockRejectedValueOnce(
-      new TypeError("CronPattern: Expected 5 or 6 fields"),
-    );
+    context.cron.add.mockRejectedValueOnce(new TypeError("CronPattern: Expected 5 or 6 fields"));
     const { respond } = await invokeCron(
       "cron.add",
       {
@@ -1472,21 +1430,14 @@ describe("cron method validation", () => {
     expect(context.cron.update).not.toHaveBeenCalled();
     expectResponseError(respond, {
       code: "INVALID_REQUEST",
-      messageIncludes:
-        'isolated/current/session cron jobs require payload.kind="agentTurn"',
+      messageIncludes: 'isolated/current/session cron jobs require payload.kind="agentTurn"',
     });
   });
 
   it("returns INVALID_REQUEST when cron.run cannot find the job", async () => {
     const context = createCronContext();
-    context.cron.enqueueRun.mockRejectedValueOnce(
-      new Error("unknown cron job id: missing"),
-    );
-    const { respond } = await invokeCron(
-      "cron.run",
-      { id: "missing" },
-      { context },
-    );
+    context.cron.enqueueRun.mockRejectedValueOnce(new Error("unknown cron job id: missing"));
+    const { respond } = await invokeCron("cron.run", { id: "missing" }, { context });
 
     expectResponseError(respond, {
       code: "INVALID_REQUEST",
