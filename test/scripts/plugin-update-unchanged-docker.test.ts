@@ -80,8 +80,7 @@ describe("plugin update unchanged Docker E2E", () => {
           {
             pluginId: CORRUPT_PLUGIN_ID,
             status: "skipped",
-            message:
-              `Disabled "${CORRUPT_PLUGIN_ID}" after plugin update failure; OpenClaw will continue without it. Failed to update ${CORRUPT_PLUGIN_ID}: registry timeout`,
+            message: `Disabled "${CORRUPT_PLUGIN_ID}" after plugin update failure; OpenClaw will continue without it. Failed to update ${CORRUPT_PLUGIN_ID}: registry timeout`,
           },
         ],
       },

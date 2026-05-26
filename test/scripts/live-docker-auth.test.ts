@@ -32,7 +32,9 @@ function resolveDockerRunArgs(pathPrefix: string) {
       ...process.env,
       PATH: pathPrefix,
     },
-  }).trimEnd().split("\n");
+  })
+    .trimEnd()
+    .split("\n");
 }
 
 afterEach(() => {
@@ -69,14 +71,9 @@ describe("scripts/lib/live-docker-auth.sh", () => {
     const binDir = makeTempBin("openclaw-live-docker-auth-plain-");
     writeExecutable(
       path.join(binDir, "timeout"),
-      [
-        "#!/bin/sh",
-        'if [ "$1" = "--kill-after=1s" ]; then',
-        "  exit 1",
-        "fi",
-        "exit 0",
-        "",
-      ].join("\n"),
+      ["#!/bin/sh", 'if [ "$1" = "--kill-after=1s" ]; then', "  exit 1", "fi", "exit 0", ""].join(
+        "\n",
+      ),
     );
 
     expect(resolveDockerRunArgs(binDir)).toEqual(["timeout", "42s", "docker", "run"]);

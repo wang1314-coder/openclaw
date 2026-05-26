@@ -76,16 +76,13 @@ jobs:
       android_matrix: ${{ steps.manifest.outputs.android_matrix }}
     steps:
       - name: Checkout
-        env:
-          CHECKOUT_REPO: ${{ github.repository }}
-          CHECKOUT_REF: ${{ inputs.target_ref || github.sha }}
-        run: |
-          set -euo pipefail
-          git init "$GITHUB_WORKSPACE"
-          git -C "$GITHUB_WORKSPACE" config gc.auto 0
-          git -C "$GITHUB_WORKSPACE" remote add origin "https://github.com/${CHECKOUT_REPO}.git"
-          git -C "$GITHUB_WORKSPACE" fetch --no-tags --depth=1 origin "+${CHECKOUT_REF}:refs/remotes/origin/checkout"
-          git -C "$GITHUB_WORKSPACE" checkout --detach refs/remotes/origin/checkout
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.target_ref || github.sha }}
+          fetch-depth: 1
+          fetch-tags: false
+          persist-credentials: false
+          submodules: false
 
       - name: Resolve checkout SHA
         id: checkout_ref
@@ -302,16 +299,13 @@ jobs:
       PRE_COMMIT_HOME: .cache/pre-commit-security-fast
     steps:
       - name: Checkout
-        env:
-          CHECKOUT_REPO: ${{ github.repository }}
-          CHECKOUT_REF: ${{ inputs.target_ref || github.sha }}
-        run: |
-          set -euo pipefail
-          git init "$GITHUB_WORKSPACE"
-          git -C "$GITHUB_WORKSPACE" config gc.auto 0
-          git -C "$GITHUB_WORKSPACE" remote add origin "https://github.com/${CHECKOUT_REPO}.git"
-          git -C "$GITHUB_WORKSPACE" fetch --no-tags --depth=1 origin "+${CHECKOUT_REF}:refs/remotes/origin/checkout"
-          git -C "$GITHUB_WORKSPACE" checkout --detach refs/remotes/origin/checkout
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.target_ref || github.sha }}
+          fetch-depth: 1
+          fetch-tags: false
+          persist-credentials: false
+          submodules: false
 
       - name: Ensure security base commit
         if: github.event_name != 'workflow_dispatch'
@@ -341,20 +335,22 @@ jobs:
           fi
           echo "PRE_COMMIT_CONFIG_PATH=$trusted_config" >> "$GITHUB_ENV"
 
-      - name: Resolve Python runtime
+      - name: Setup Python
         id: setup-python
-        run: |
-          set -euo pipefail
-          python3 --version
-          version="$(python3 - <<'PY'
-          import platform
-          print(platform.python_version())
-          PY
-          )"
-          echo "python-version=${version}" >> "$GITHUB_OUTPUT"
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Restore pre-commit cache
+        uses: actions/cache@v5
+        with:
+          path: .cache/pre-commit-security-fast
+          key: pre-commit-security-fast-${{ runner.os }}-${{ steps.setup-python.outputs.python-version }}-${{ hashFiles('.pre-commit-config.yaml') }}
+          restore-keys: |
+            pre-commit-security-fast-${{ runner.os }}-${{ steps.setup-python.outputs.python-version }}-
 
       - name: Install pre-commit
-        run: python3 -m pip install --disable-pip-version-check pre-commit==4.2.0
+        run: python -m pip install --disable-pip-version-check pre-commit==4.2.0
 
       - name: Detect committed private keys
         run: pre-commit run --config "${PRE_COMMIT_CONFIG_PATH:-.pre-commit-config.yaml}" --all-files detect-private-key
@@ -387,12 +383,10 @@ jobs:
           pre-commit run --config "${PRE_COMMIT_CONFIG_PATH:-.pre-commit-config.yaml}" zizmor --files "${workflow_files[@]}"
 
       - name: Setup Node.js
-        env:
-          REQUESTED_NODE_VERSION: "24.x"
-        run: |
-          set -euo pipefail
-          source .github/actions/setup-pnpm-store-cache/ensure-node.sh
-          openclaw_ensure_node "$REQUESTED_NODE_VERSION"
+        uses: actions/setup-node@v6
+        with:
+          node-version: "24.x"
+          check-latest: false
 
       - name: Audit production dependencies
         run: node scripts/pre-commit/pnpm-audit-prod.mjs --audit-level=high
@@ -417,10 +411,13 @@ jobs:
         env:
           CHECKOUT_REPO: ${{ github.repository }}
           CHECKOUT_SHA: ${{ needs.preflight.outputs.checkout_revision }}
+          CHECKOUT_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
 
           workdir="$GITHUB_WORKSPACE"
+          auth_header="$(printf 'x-access-token:%s' "$CHECKOUT_TOKEN" | base64 | tr -d '\n')"
+
           reset_checkout_dir() {
             mkdir -p "$workdir"
             find "$workdir" -mindepth 1 -maxdepth 1 -exec rm -rf {} +
@@ -432,11 +429,12 @@ jobs:
             reset_checkout_dir
             git init "$workdir" >/dev/null
             git config --global --add safe.directory "$workdir"
-            git -C "$workdir" remote add origin "https://github.com/${CHECKOUT_REPO}.git"
+            git -C "$workdir" remote add origin "https://github.com/${CHECKOUT_REPO}"
             git -C "$workdir" config gc.auto 0
 
             timeout --signal=TERM 30s git -C "$workdir" \
               -c protocol.version=2 \
+              -c "http.https://github.com/.extraheader=AUTHORIZATION: basic ${auth_header}" \
               fetch --no-tags --prune --no-recurse-submodules --depth=1 origin \
               "+${CHECKOUT_SHA}:refs/remotes/origin/ci-target" || return 1
 
@@ -518,24 +516,7 @@ jobs:
         run: pnpm test:build:singleton
 
       - name: Check CLI startup memory
-        shell: bash
-        run: |
-          set +e
-          pnpm test:startup:memory
-          status=$?
-          if [[ -f .artifacts/startup-memory/summary.md ]]; then
-            cat .artifacts/startup-memory/summary.md >> "$GITHUB_STEP_SUMMARY"
-          fi
-          exit "$status"
-
-      - name: Upload startup memory report
-        if: always()
-        uses: actions/upload-artifact@v7
-        with:
-          name: startup-memory
-          path: .artifacts/startup-memory/
-          if-no-files-found: ignore
-          retention-days: 7
+        run: pnpm test:startup:memory
 
       - name: Run built artifact checks
         id: built_artifact_checks
@@ -641,10 +622,13 @@ jobs:
         env:
           CHECKOUT_REPO: ${{ github.repository }}
           CHECKOUT_SHA: ${{ needs.preflight.outputs.checkout_revision }}
+          CHECKOUT_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
 
           workdir="$GITHUB_WORKSPACE"
+          auth_header="$(printf 'x-access-token:%s' "$CHECKOUT_TOKEN" | base64 | tr -d '\n')"
+
           reset_checkout_dir() {
             mkdir -p "$workdir"
             find "$workdir" -mindepth 1 -maxdepth 1 -exec rm -rf {} +
@@ -656,11 +640,12 @@ jobs:
             reset_checkout_dir
             git init "$workdir" >/dev/null
             git config --global --add safe.directory "$workdir"
-            git -C "$workdir" remote add origin "https://github.com/${CHECKOUT_REPO}.git"
+            git -C "$workdir" remote add origin "https://github.com/${CHECKOUT_REPO}"
             git -C "$workdir" config gc.auto 0
 
             timeout --signal=TERM 30s git -C "$workdir" \
               -c protocol.version=2 \
+              -c "http.https://github.com/.extraheader=AUTHORIZATION: basic ${auth_header}" \
               fetch --no-tags --prune --no-recurse-submodules --depth=1 origin \
               "+${CHECKOUT_SHA}:refs/remotes/origin/ci-target" || return 1
 
@@ -727,10 +712,13 @@ jobs:
         env:
           CHECKOUT_REPO: ${{ github.repository }}
           CHECKOUT_SHA: ${{ needs.preflight.outputs.checkout_revision }}
+          CHECKOUT_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
 
           workdir="$GITHUB_WORKSPACE"
+          auth_header="$(printf 'x-access-token:%s' "$CHECKOUT_TOKEN" | base64 | tr -d '\n')"
+
           reset_checkout_dir() {
             mkdir -p "$workdir"
             find "$workdir" -mindepth 1 -maxdepth 1 -exec rm -rf {} +
@@ -742,11 +730,12 @@ jobs:
             reset_checkout_dir
             git init "$workdir" >/dev/null
             git config --global --add safe.directory "$workdir"
-            git -C "$workdir" remote add origin "https://github.com/${CHECKOUT_REPO}.git"
+            git -C "$workdir" remote add origin "https://github.com/${CHECKOUT_REPO}"
             git -C "$workdir" config gc.auto 0
 
             timeout --signal=TERM 30s git -C "$workdir" \
               -c protocol.version=2 \
+              -c "http.https://github.com/.extraheader=AUTHORIZATION: basic ${auth_header}" \
               fetch --no-tags --prune --no-recurse-submodules --depth=1 origin \
               "+${CHECKOUT_SHA}:refs/remotes/origin/ci-target" || return 1
 
@@ -807,10 +796,13 @@ jobs:
         env:
           CHECKOUT_REPO: ${{ github.repository }}
           CHECKOUT_SHA: ${{ needs.preflight.outputs.checkout_revision }}
+          CHECKOUT_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
 
           workdir="$GITHUB_WORKSPACE"
+          auth_header="$(printf 'x-access-token:%s' "$CHECKOUT_TOKEN" | base64 | tr -d '\n')"
+
           reset_checkout_dir() {
             mkdir -p "$workdir"
             find "$workdir" -mindepth 1 -maxdepth 1 -exec rm -rf {} +
@@ -822,11 +814,12 @@ jobs:
             reset_checkout_dir
             git init "$workdir" >/dev/null
             git config --global --add safe.directory "$workdir"
-            git -C "$workdir" remote add origin "https://github.com/${CHECKOUT_REPO}.git"
+            git -C "$workdir" remote add origin "https://github.com/${CHECKOUT_REPO}"
             git -C "$workdir" config gc.auto 0
 
             timeout --signal=TERM 30s git -C "$workdir" \
               -c protocol.version=2 \
+              -c "http.https://github.com/.extraheader=AUTHORIZATION: basic ${auth_header}" \
               fetch --no-tags --prune --no-recurse-submodules --depth=1 origin \
               "+${CHECKOUT_SHA}:refs/remotes/origin/ci-target" || return 1
 
@@ -884,10 +877,13 @@ jobs:
         env:
           CHECKOUT_REPO: ${{ github.repository }}
           CHECKOUT_SHA: ${{ needs.preflight.outputs.checkout_revision }}
+          CHECKOUT_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
 
           workdir="$GITHUB_WORKSPACE"
+          auth_header="$(printf 'x-access-token:%s' "$CHECKOUT_TOKEN" | base64 | tr -d '\n')"
+
           reset_checkout_dir() {
             mkdir -p "$workdir"
             find "$workdir" -mindepth 1 -maxdepth 1 -exec rm -rf {} +
@@ -899,11 +895,12 @@ jobs:
             reset_checkout_dir
             git init "$workdir" >/dev/null
             git config --global --add safe.directory "$workdir"
-            git -C "$workdir" remote add origin "https://github.com/${CHECKOUT_REPO}.git"
+            git -C "$workdir" remote add origin "https://github.com/${CHECKOUT_REPO}"
             git -C "$workdir" config gc.auto 0
 
             timeout --signal=TERM 30s git -C "$workdir" \
               -c protocol.version=2 \
+              -c "http.https://github.com/.extraheader=AUTHORIZATION: basic ${auth_header}" \
               fetch --no-tags --prune --no-recurse-submodules --depth=1 origin \
               "+${CHECKOUT_SHA}:refs/remotes/origin/ci-target" || return 1
 
@@ -959,10 +956,13 @@ jobs:
         env:
           CHECKOUT_REPO: ${{ github.repository }}
           CHECKOUT_SHA: ${{ needs.preflight.outputs.checkout_revision }}
+          CHECKOUT_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
 
           workdir="$GITHUB_WORKSPACE"
+          auth_header="$(printf 'x-access-token:%s' "$CHECKOUT_TOKEN" | base64 | tr -d '\n')"
+
           reset_checkout_dir() {
             mkdir -p "$workdir"
             find "$workdir" -mindepth 1 -maxdepth 1 -exec rm -rf {} +
@@ -974,11 +974,12 @@ jobs:
             reset_checkout_dir
             git init "$workdir" >/dev/null
             git config --global --add safe.directory "$workdir"
-            git -C "$workdir" remote add origin "https://github.com/${CHECKOUT_REPO}.git"
+            git -C "$workdir" remote add origin "https://github.com/${CHECKOUT_REPO}"
             git -C "$workdir" config gc.auto 0
 
             timeout --signal=TERM 30s git -C "$workdir" \
               -c protocol.version=2 \
+              -c "http.https://github.com/.extraheader=AUTHORIZATION: basic ${auth_header}" \
               fetch --no-tags --prune --no-recurse-submodules --depth=1 origin \
               "+${CHECKOUT_SHA}:refs/remotes/origin/ci-target" || return 1
 
@@ -1081,10 +1082,13 @@ jobs:
         env:
           CHECKOUT_REPO: ${{ github.repository }}
           CHECKOUT_SHA: ${{ needs.preflight.outputs.checkout_revision }}
+          CHECKOUT_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
 
           workdir="$GITHUB_WORKSPACE"
+          auth_header="$(printf 'x-access-token:%s' "$CHECKOUT_TOKEN" | base64 | tr -d '\n')"
+
           reset_checkout_dir() {
             mkdir -p "$workdir"
             find "$workdir" -mindepth 1 -maxdepth 1 -exec rm -rf {} +
@@ -1096,11 +1100,12 @@ jobs:
             reset_checkout_dir
             git init "$workdir" >/dev/null
             git config --global --add safe.directory "$workdir"
-            git -C "$workdir" remote add origin "https://github.com/${CHECKOUT_REPO}.git"
+            git -C "$workdir" remote add origin "https://github.com/${CHECKOUT_REPO}"
             git -C "$workdir" config gc.auto 0
 
             timeout --signal=TERM 30s git -C "$workdir" \
               -c protocol.version=2 \
+              -c "http.https://github.com/.extraheader=AUTHORIZATION: basic ${auth_header}" \
               fetch --no-tags --prune --no-recurse-submodules --depth=1 origin \
               "+${CHECKOUT_SHA}:refs/remotes/origin/ci-target" || return 1
 
@@ -1211,10 +1216,13 @@ jobs:
         env:
           CHECKOUT_REPO: ${{ github.repository }}
           CHECKOUT_SHA: ${{ needs.preflight.outputs.checkout_revision }}
+          CHECKOUT_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
 
           workdir="$GITHUB_WORKSPACE"
+          auth_header="$(printf 'x-access-token:%s' "$CHECKOUT_TOKEN" | base64 | tr -d '\n')"
+
           reset_checkout_dir() {
             mkdir -p "$workdir"
             find "$workdir" -mindepth 1 -maxdepth 1 -exec rm -rf {} +
@@ -1226,11 +1234,12 @@ jobs:
             reset_checkout_dir
             git init "$workdir" >/dev/null
             git config --global --add safe.directory "$workdir"
-            git -C "$workdir" remote add origin "https://github.com/${CHECKOUT_REPO}.git"
+            git -C "$workdir" remote add origin "https://github.com/${CHECKOUT_REPO}"
             git -C "$workdir" config gc.auto 0
 
             timeout --signal=TERM 30s git -C "$workdir" \
               -c protocol.version=2 \
+              -c "http.https://github.com/.extraheader=AUTHORIZATION: basic ${auth_header}" \
               fetch --no-tags --prune --no-recurse-submodules --depth=1 origin \
               "+${CHECKOUT_SHA}:refs/remotes/origin/ci-target" || return 1
 
@@ -1360,10 +1369,13 @@ jobs:
         env:
           CHECKOUT_REPO: ${{ github.repository }}
           CHECKOUT_SHA: ${{ needs.preflight.outputs.checkout_revision }}
+          CHECKOUT_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
 
           workdir="$GITHUB_WORKSPACE"
+          auth_header="$(printf 'x-access-token:%s' "$CHECKOUT_TOKEN" | base64 | tr -d '\n')"
+
           reset_checkout_dir() {
             mkdir -p "$workdir"
             find "$workdir" -mindepth 1 -maxdepth 1 -exec rm -rf {} +
@@ -1375,11 +1387,12 @@ jobs:
             reset_checkout_dir
             git init "$workdir" >/dev/null
             git config --global --add safe.directory "$workdir"
-            git -C "$workdir" remote add origin "https://github.com/${CHECKOUT_REPO}.git"
+            git -C "$workdir" remote add origin "https://github.com/${CHECKOUT_REPO}"
             git -C "$workdir" config gc.auto 0
 
             timeout --signal=TERM 30s git -C "$workdir" \
               -c protocol.version=2 \
+              -c "http.https://github.com/.extraheader=AUTHORIZATION: basic ${auth_header}" \
               fetch --no-tags --prune --no-recurse-submodules --depth=1 origin \
               "+${CHECKOUT_SHA}:refs/remotes/origin/ci-target" || return 1
 
@@ -1405,13 +1418,12 @@ jobs:
           install-bun: "false"
 
       - name: Checkout ClawHub docs source
-        run: |
-          set -euo pipefail
-          git init clawhub-source
-          git -C clawhub-source config gc.auto 0
-          git -C clawhub-source remote add origin "https://github.com/openclaw/clawhub.git"
-          git -C clawhub-source fetch --no-tags --depth=1 origin "+HEAD:refs/remotes/origin/checkout"
-          git -C clawhub-source checkout --detach refs/remotes/origin/checkout
+        uses: actions/checkout@v6
+        with:
+          repository: openclaw/clawhub
+          path: clawhub-source
+          fetch-depth: 1
+          persist-credentials: false
 
       - name: Check docs
         env:
@@ -1427,16 +1439,11 @@ jobs:
     timeout-minutes: 20
     steps:
       - name: Checkout
-        env:
-          CHECKOUT_REPO: ${{ github.repository }}
-          CHECKOUT_SHA: ${{ needs.preflight.outputs.checkout_revision }}
-        run: |
-          set -euo pipefail
-          git init "$GITHUB_WORKSPACE"
-          git -C "$GITHUB_WORKSPACE" config gc.auto 0
-          git -C "$GITHUB_WORKSPACE" remote add origin "https://github.com/${CHECKOUT_REPO}.git"
-          git -C "$GITHUB_WORKSPACE" fetch --no-tags --depth=1 origin "+${CHECKOUT_SHA}:refs/remotes/origin/checkout"
-          git -C "$GITHUB_WORKSPACE" checkout --detach refs/remotes/origin/checkout
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.preflight.outputs.checkout_revision }}
+          persist-credentials: false
+          submodules: false
 
       - name: Setup Python
         uses: actions/setup-python@v6
@@ -1475,16 +1482,11 @@ jobs:
       matrix: ${{ fromJson(needs.preflight.outputs.checks_windows_matrix) }}
     steps:
       - name: Checkout
-        env:
-          CHECKOUT_REPO: ${{ github.repository }}
-          CHECKOUT_SHA: ${{ needs.preflight.outputs.checkout_revision }}
-        run: |
-          set -euo pipefail
-          git init "$GITHUB_WORKSPACE"
-          git -C "$GITHUB_WORKSPACE" config gc.auto 0
-          git -C "$GITHUB_WORKSPACE" remote add origin "https://github.com/${CHECKOUT_REPO}.git"
-          git -C "$GITHUB_WORKSPACE" fetch --no-tags --depth=1 origin "+${CHECKOUT_SHA}:refs/remotes/origin/checkout"
-          git -C "$GITHUB_WORKSPACE" checkout --detach refs/remotes/origin/checkout
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.preflight.outputs.checkout_revision }}
+          persist-credentials: false
+          submodules: false
 
       - name: Try to exclude workspace from Windows Defender (best-effort)
         shell: pwsh
@@ -1506,12 +1508,10 @@ jobs:
           }
 
       - name: Setup Node.js
-        env:
-          REQUESTED_NODE_VERSION: "24.x"
-        run: |
-          set -euo pipefail
-          source .github/actions/setup-pnpm-store-cache/ensure-node.sh
-          openclaw_ensure_node "$REQUESTED_NODE_VERSION"
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24.x
+          check-latest: false
 
       - name: Setup pnpm
         uses: ./.github/actions/setup-pnpm-store-cache
@@ -1575,16 +1575,11 @@ jobs:
       matrix: ${{ fromJson(needs.preflight.outputs.macos_node_matrix) }}
     steps:
       - name: Checkout
-        env:
-          CHECKOUT_REPO: ${{ github.repository }}
-          CHECKOUT_SHA: ${{ needs.preflight.outputs.checkout_revision }}
-        run: |
-          set -euo pipefail
-          git init "$GITHUB_WORKSPACE"
-          git -C "$GITHUB_WORKSPACE" config gc.auto 0
-          git -C "$GITHUB_WORKSPACE" remote add origin "https://github.com/${CHECKOUT_REPO}.git"
-          git -C "$GITHUB_WORKSPACE" fetch --no-tags --depth=1 origin "+${CHECKOUT_SHA}:refs/remotes/origin/checkout"
-          git -C "$GITHUB_WORKSPACE" checkout --detach refs/remotes/origin/checkout
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.preflight.outputs.checkout_revision }}
+          persist-credentials: false
+          submodules: false
 
       - name: Setup Node environment
         uses: ./.github/actions/setup-node-env
@@ -1621,16 +1616,11 @@ jobs:
     timeout-minutes: 20
     steps:
       - name: Checkout
-        env:
-          CHECKOUT_REPO: ${{ github.repository }}
-          CHECKOUT_SHA: ${{ needs.preflight.outputs.checkout_revision }}
-        run: |
-          set -euo pipefail
-          git init "$GITHUB_WORKSPACE"
-          git -C "$GITHUB_WORKSPACE" config gc.auto 0
-          git -C "$GITHUB_WORKSPACE" remote add origin "https://github.com/${CHECKOUT_REPO}.git"
-          git -C "$GITHUB_WORKSPACE" fetch --no-tags --depth=1 origin "+${CHECKOUT_SHA}:refs/remotes/origin/checkout"
-          git -C "$GITHUB_WORKSPACE" checkout --detach refs/remotes/origin/checkout
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.preflight.outputs.checkout_revision }}
+          persist-credentials: false
+          submodules: false
 
       - name: Install XcodeGen / SwiftLint / SwiftFormat
         run: brew install xcodegen swiftlint swiftformat
@@ -1730,10 +1720,13 @@ jobs:
         env:
           CHECKOUT_REPO: ${{ github.repository }}
           CHECKOUT_SHA: ${{ needs.preflight.outputs.checkout_revision }}
+          CHECKOUT_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
 
           workdir="$GITHUB_WORKSPACE"
+          auth_header="$(printf 'x-access-token:%s' "$CHECKOUT_TOKEN" | base64 | tr -d '\n')"
+
           reset_checkout_dir() {
             mkdir -p "$workdir"
             find "$workdir" -mindepth 1 -maxdepth 1 -exec rm -rf {} +
@@ -1745,11 +1738,12 @@ jobs:
             reset_checkout_dir
             git init "$workdir" >/dev/null
             git config --global --add safe.directory "$workdir"
-            git -C "$workdir" remote add origin "https://github.com/${CHECKOUT_REPO}.git"
+            git -C "$workdir" remote add origin "https://github.com/${CHECKOUT_REPO}"
             git -C "$workdir" config gc.auto 0
 
             timeout --signal=TERM 30s git -C "$workdir" \
               -c protocol.version=2 \
+              -c "http.https://github.com/.extraheader=AUTHORIZATION: basic ${auth_header}" \
               fetch --no-tags --prune --no-recurse-submodules --depth=1 origin \
               "+${CHECKOUT_SHA}:refs/remotes/origin/ci-target" || return 1
 
