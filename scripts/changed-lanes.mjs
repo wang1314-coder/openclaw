@@ -68,6 +68,10 @@ export function createEmptyChangedLanes() {
   };
 }
 
+export function isChangedLaneTestPath(changedPath) {
+  return TEST_PATH_RE.test(normalizeChangedPath(changedPath));
+}
+
 /**
  * @param {string[]} changedPaths
  * @param {{ packageJsonChangeKind?: "liveDockerTooling" | "tooling" | null }} [options]
@@ -149,7 +153,7 @@ export function detectChangedLanes(changedPaths, options = {}) {
     }
 
     if (EXTENSION_PATH_RE.test(changedPath)) {
-      if (TEST_PATH_RE.test(changedPath)) {
+      if (isChangedLaneTestPath(changedPath)) {
         lanes.extensionTests = true;
         reasons.push(`${changedPath}: extension test`);
       } else {
@@ -161,7 +165,7 @@ export function detectChangedLanes(changedPaths, options = {}) {
     }
 
     if (CORE_PATH_RE.test(changedPath)) {
-      if (TEST_PATH_RE.test(changedPath)) {
+      if (isChangedLaneTestPath(changedPath)) {
         lanes.coreTests = true;
         reasons.push(`${changedPath}: core test`);
       } else {

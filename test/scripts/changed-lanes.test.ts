@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   createEmptyChangedLanes,
   detectChangedLanes,
+  isChangedLaneTestPath,
   isLiveDockerPackageScriptOnlyChange,
   isPackageScriptOnlyChange,
 } from "../../scripts/changed-lanes.mjs";
@@ -15,6 +16,7 @@ import {
   createPnpmManagedCommand,
   shouldDelegateChangedCheckToCrabbox,
   shouldRunShrinkwrapGuard,
+  shouldRunTestTempCreationReport,
   createShrinkwrapGuardCommand,
 } from "../../scripts/check-changed.mjs";
 import { isDirectRunPath } from "../../scripts/lib/direct-run.mjs";
@@ -73,6 +75,12 @@ afterEach(() => {
 });
 
 describe("scripts/changed-lanes", () => {
+  it("keeps a non-executed changed-gate warning fixture", () => {
+    const warningFixture = 'fs.mkdtemp("openclaw-warning-fixture-", () => {})';
+
+    expect(warningFixture).toContain("mkdtemp");
+  });
+
   it("detects direct script execution from Windows argv paths", () => {
     expect(
       isDirectRunPath(
@@ -273,6 +281,13 @@ describe("scripts/changed-lanes", () => {
     expect(result.paths).toEqual(["scripts/test-live-acp-bind-docker.sh"]);
     expect(result.lanes.liveDockerTooling).toBe(true);
     expect(result.lanes.all).toBe(false);
+  });
+
+  it("exposes the shared changed-lane test path classifier", () => {
+    expect(isChangedLaneTestPath("src/shared/string-normalization.test.ts")).toBe(true);
+    expect(isChangedLaneTestPath("packages/foo/__tests__/helper.ts")).toBe(true);
+    expect(isChangedLaneTestPath("src/example.ts")).toBe(false);
+    expect(isChangedLaneTestPath("src/latest.ts")).toBe(false);
   });
 
   it("routes core production changes to core prod and core test lanes", () => {
@@ -567,6 +582,7 @@ describe("scripts/changed-lanes", () => {
       "duplicate scan target coverage",
       "dependency pin guard",
       "package patch guard",
+      "test temp creation report (warning-only)",
       "typecheck core tests",
       "lint core",
       "lint scripts",
@@ -1057,6 +1073,30 @@ describe("scripts/changed-lanes", () => {
 
     expect(plan.commands.map((command) => command.args[0])).toContain("lint:scripts");
     expect(plan.commands.map((command) => command.args[0])).not.toContain("test");
+  });
+
+  it("adds the warning-only temp creation report for changed test paths", () => {
+    const result = detectChangedLanes(["test/helpers/temp-fixture.ts"]);
+    const plan = createChangedCheckPlan(result, { base: "main", head: "feature" });
+    const command = plan.commands.find(
+      (candidate) => candidate.name === "test temp creation report (warning-only)",
+    );
+
+    expect(shouldRunTestTempCreationReport(result.paths)).toBe(true);
+    expect(command).toMatchObject({
+      bin: "node",
+      args: ["scripts/report-test-temp-creations.mjs", "--base", "main", "--head", "feature"],
+    });
+  });
+
+  it("keeps the temp creation report out of non-test changed paths", () => {
+    const result = detectChangedLanes(["scripts/check-changed.mjs"]);
+    const plan = createChangedCheckPlan(result);
+
+    expect(shouldRunTestTempCreationReport(result.paths)).toBe(false);
+    expect(plan.commands.map((command) => command.name)).not.toContain(
+      "test temp creation report (warning-only)",
+    );
   });
 
   it("does not route generated plugin bundle artifacts as direct Vitest targets", () => {
