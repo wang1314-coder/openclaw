@@ -6,6 +6,29 @@ import { resetPdfToolAuthEnv } from "./pdf-tool.test-support.js";
 const ANTHROPIC_PDF_MODEL = "anthropic/claude-opus-4-7";
 const TEST_AGENT_DIR = "/tmp/openclaw-pdf-model-config";
 
+type MockAuthStore = { profiles?: Record<string, { provider?: string }> };
+
+function hasOpenAiCodexProfile(authStore?: MockAuthStore): boolean {
+  return Object.values(authStore?.profiles ?? {}).some(
+    (profile) => profile?.provider === "openai-codex",
+  );
+}
+
+function makeOpenAiCodexAuthStore() {
+  return {
+    version: 1,
+    profiles: {
+      "openai-codex:test": {
+        type: "oauth",
+        provider: "openai-codex",
+        access: "codex-oauth-token",
+        refresh: "codex-refresh-token",
+        expires: Date.now() + 60_000,
+      },
+    },
+  } as const;
+}
+
 vi.mock("./model-config.helpers.js", () => ({
   coerceToolModelConfig: (model?: unknown) => {
     if (typeof model === "string") {
@@ -18,10 +41,21 @@ vi.mock("./model-config.helpers.js", () => ({
       ...(objectModel?.fallbacks?.length ? { fallbacks: objectModel.fallbacks } : {}),
     };
   },
-  hasProviderAuthForTool: ({ provider, cfg }: { provider: string; cfg?: OpenClawConfig }) => {
+  hasProviderAuthForTool: ({
+    provider,
+    cfg,
+    authStore,
+  }: {
+    provider: string;
+    cfg?: OpenClawConfig;
+    authStore?: MockAuthStore;
+  }) => {
     const providerCfg = cfg?.models?.providers?.[provider] as { apiKey?: string } | undefined;
     if (providerCfg?.apiKey?.trim()) {
       return true;
+    }
+    if (provider === "codex") {
+      return hasOpenAiCodexProfile(authStore);
     }
     if (provider === "anthropic") {
       return Boolean(process.env.ANTHROPIC_API_KEY || process.env.ANTHROPIC_OAUTH_TOKEN);
@@ -41,6 +75,28 @@ vi.mock("./model-config.helpers.js", () => ({
       return Boolean(process.env.MINIMAX_API_KEY);
     }
     return false;
+  },
+  resolveCodexMediaCandidateForOpenAiCodexRoute: ({
+    primary,
+    authStore,
+    resolveDefaultMediaModel,
+  }: {
+    primary: { provider: string; model: string };
+    authStore?: MockAuthStore;
+    resolveDefaultMediaModel: (params: {
+      providerId: string;
+      capability: "image";
+    }) => string | undefined;
+  }) => {
+    if (
+      primary.provider !== "openai" ||
+      !primary.model.startsWith("gpt-") ||
+      !hasOpenAiCodexProfile(authStore)
+    ) {
+      return null;
+    }
+    const model = resolveDefaultMediaModel({ providerId: "codex", capability: "image" });
+    return model ? `codex/${model}` : null;
   },
   resolveDefaultModelRef: (cfg?: OpenClawConfig) => {
     const modelCfg = cfg?.agents?.defaults?.model;
@@ -116,6 +172,15 @@ describe("resolvePdfModelConfigForTool", () => {
     expect(resolvePdfModelConfigForTool({ cfg, agentDir: TEST_AGENT_DIR })?.primary).toBe(
       ANTHROPIC_PDF_MODEL,
     );
+  });
+
+  it("selects bounded Codex image understanding for OpenAI GPT models with Codex OAuth only", () => {
+    const cfg = withDefaultModel("openai/gpt-5.5");
+    const authStore = makeOpenAiCodexAuthStore();
+
+    expect(resolvePdfModelConfigForTool({ cfg, agentDir: TEST_AGENT_DIR, authStore })).toEqual({
+      primary: "codex/gpt-5.5",
+    });
   });
 
   it("uses configured MiniMax chat models for PDF text extraction fallback", () => {

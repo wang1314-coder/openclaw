@@ -13,7 +13,11 @@ import {
   resolveConfiguredImageModelRefs,
   resolveProviderVisionModelFromConfig,
 } from "./image-tool.helpers.js";
-import { hasProviderAuthForTool, resolveDefaultModelRef } from "./model-config.helpers.js";
+import {
+  hasProviderAuthForTool,
+  resolveCodexMediaCandidateForOpenAiCodexRoute,
+  resolveDefaultModelRef,
+} from "./model-config.helpers.js";
 import { coercePdfModelConfig } from "./pdf-tool.helpers.js";
 
 function formatProviderModelRef(providerId: string, modelId: string): string {
@@ -268,6 +272,17 @@ export function resolvePdfModelConfigForTool(params: {
     workspaceDir: params.workspaceDir,
     authStore: params.authStore,
   });
+  const codexContextCandidate = resolveCodexMediaCandidateForOpenAiCodexRoute({
+    cfg: params.cfg,
+    primary,
+    agentDir: params.agentDir,
+    workspaceDir: params.workspaceDir,
+    authStore: params.authStore,
+    resolveDefaultMediaModel,
+  });
+  if (codexContextCandidate && !genericImageCandidates.includes(codexContextCandidate)) {
+    genericImageCandidates.unshift(codexContextCandidate);
+  }
   const textExtractionCandidates = resolveTextExtractionCandidateRefs({
     cfg: params.cfg,
     primary,

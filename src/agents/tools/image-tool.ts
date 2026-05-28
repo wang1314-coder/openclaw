@@ -65,6 +65,7 @@ import {
 import {
   buildToolModelConfigFromCandidates,
   hasToolModelConfig,
+  resolveCodexMediaCandidateForOpenAiCodexRoute,
   resolveDefaultModelRef,
 } from "./model-config.helpers.js";
 import {
@@ -157,6 +158,15 @@ function isCanonicalCandidateShadowedByExecutionAlias(
   return candidates.some((shadowCandidate) =>
     isExecutionAliasCandidateForProvider(shadowCandidate, candidateProvider),
   );
+}
+
+function isProviderQualifiedModelRef(ref: string | undefined | null): boolean {
+  const trimmed = ref?.trim();
+  if (!trimmed) {
+    return false;
+  }
+  const slash = trimmed.indexOf("/");
+  return slash > 0 && slash < trimmed.length - 1;
 }
 
 export const testing = {
@@ -295,6 +305,16 @@ export function resolveImageModelConfigForTool(params: {
     primaryAliasCandidates.length === 0
       ? autoCandidates
       : autoCandidates.filter((candidate) => !primaryAliasCandidates.includes(candidate));
+  const codexContextCandidates = [
+    resolveCodexMediaCandidateForOpenAiCodexRoute({
+      cfg: params.cfg,
+      primary,
+      agentDir: params.agentDir,
+      workspaceDir: params.workspaceDir,
+      authStore: params.authStore,
+      resolveDefaultMediaModel: imageToolProviderDeps.resolveDefaultMediaModel,
+    }),
+  ];
 
   return buildToolModelConfigFromCandidates({
     explicit,
@@ -302,7 +322,12 @@ export function resolveImageModelConfigForTool(params: {
     workspaceDir: params.workspaceDir,
     agentDir: params.agentDir,
     authStore: params.authStore,
-    candidates: [...primaryAliasCandidates, ...primaryCandidates, ...remainingAutoCandidates],
+    candidates: [
+      ...primaryAliasCandidates,
+      ...primaryCandidates,
+      ...codexContextCandidates,
+      ...remainingAutoCandidates,
+    ],
   });
 }
 
@@ -318,6 +343,36 @@ function resolveImageModelConfigForOverride(params: {
     cfg: params.cfg,
     imageModelConfig: { primary: model },
   });
+}
+
+function resolveImageModelConfigForExecution(params: {
+  cfg?: OpenClawConfig;
+  agentDir: string;
+  workspaceDir?: string;
+  authStore?: AuthProfileStore;
+  resolvedImageModelConfig?: ImageModelConfig | null;
+  modelOverride?: string;
+}): ImageModelConfig | null {
+  const modelOverride = params.modelOverride?.trim();
+  if (modelOverride && isProviderQualifiedModelRef(modelOverride)) {
+    return resolveImageModelConfigForOverride({
+      cfg: params.cfg,
+      modelOverride,
+    });
+  }
+  return (
+    params.resolvedImageModelConfig ??
+    resolveImageModelConfigForTool({
+      cfg: params.cfg,
+      agentDir: params.agentDir,
+      workspaceDir: params.workspaceDir,
+      authStore: params.authStore,
+    }) ??
+    resolveImageModelConfigForOverride({
+      cfg: params.cfg,
+      modelOverride,
+    })
+  );
 }
 
 function pickMaxBytes(cfg?: OpenClawConfig, maxBytesMb?: number): number | undefined {
@@ -336,10 +391,12 @@ function resolveCompressionModelCandidates(params: {
   imageModelConfig?: ImageModelConfig | null;
   modelOverride?: string;
 }): Array<{ provider: string; model: string }> {
-  const overrideConfig = resolveImageModelConfigForOverride({
-    cfg: params.cfg,
-    modelOverride: params.modelOverride,
-  });
+  const overrideConfig = isProviderQualifiedModelRef(params.modelOverride)
+    ? resolveImageModelConfigForOverride({
+        cfg: params.cfg,
+        modelOverride: params.modelOverride,
+      })
+    : null;
   const configuredImageModelConfig = params.imageModelConfig
     ? resolveConfiguredImageModelRefs({
         cfg: params.cfg,
@@ -353,6 +410,7 @@ function resolveCompressionModelCandidates(params: {
   return resolveImageFallbackCandidates({
     cfg: effectiveCfg,
     defaultProvider: resolveImageFallbackDefaultProvider(effectiveCfg),
+    modelOverride: params.modelOverride,
   });
 }
 
@@ -743,10 +801,10 @@ export function createImageTool(options?: {
   // If model has native vision, images in the prompt are auto-injected
   // so this tool is only needed when image wasn't provided in the prompt
   const description = options?.modelHasVision
-    ? "Analyze images with vision model. Use image for one path/URL, images for max 20. Only use this tool when images were NOT already provided; prompt images already visible."
+    ? "Analyze images with vision model. Use image for one path/URL, images for max 20. Only use this tool when images were NOT already provided; prompt images already visible. Omit model unless intentionally overriding the configured image route."
     : explicitImageModelConfig
-      ? "Analyze images with configured image model. Use image for one path/URL, images for max 20. Prompt says what to inspect."
-      : "Analyze images with available vision model. Use image for one path/URL, images for max 20. Prompt says what to inspect.";
+      ? "Analyze images with configured image model. Use image for one path/URL, images for max 20. Prompt says what to inspect. Omit model unless intentionally overriding the configured image route."
+      : "Analyze images with available vision model. Use image for one path/URL, images for max 20. Prompt says what to inspect. Omit model unless intentionally overriding the configured image route.";
 
   return {
     label: "Image",
@@ -760,7 +818,12 @@ export function createImageTool(options?: {
           description: "Image paths/URLs; maxImages default 20.",
         }),
       ),
-      model: Type.Optional(Type.String()),
+      model: Type.Optional(
+        Type.String({
+          description:
+            "Optional provider/model override. Usually omit so OpenClaw uses agents.defaults.imageModel. Use codex/gpt-* for bounded Codex image understanding.",
+        }),
+      ),
       maxBytesMb: Type.Optional(Type.Number()),
       maxImages: Type.Optional(Type.Number()),
     }),
@@ -817,18 +880,14 @@ export function createImageTool(options?: {
       );
       const maxBytesMb = typeof record.maxBytesMb === "number" ? record.maxBytesMb : undefined;
       const maxBytes = pickMaxBytes(options?.config, maxBytesMb);
-      const imageModelConfig =
-        resolvedImageModelConfig ??
-        resolveImageModelConfigForOverride({
-          cfg: options?.config,
-          modelOverride,
-        }) ??
-        resolveImageModelConfigForTool({
-          cfg: options?.config,
-          agentDir,
-          workspaceDir: options?.workspaceDir,
-          authStore: options?.authProfileStore,
-        });
+      const imageModelConfig = resolveImageModelConfigForExecution({
+        cfg: options?.config,
+        agentDir,
+        workspaceDir: options?.workspaceDir,
+        authStore: options?.authProfileStore,
+        resolvedImageModelConfig,
+        modelOverride,
+      });
       if (!imageModelConfig) {
         throw new Error(
           "No image model is configured. Set agents.defaults.imageModel or configure an image-capable provider.",

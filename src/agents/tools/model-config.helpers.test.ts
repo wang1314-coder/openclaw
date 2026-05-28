@@ -1,10 +1,40 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { OpenClawConfig } from "../../config/config.js";
+import type { RuntimeProviderAuthLookup } from "../model-auth.js";
 import { hasProviderAuthForTool } from "./model-config.helpers.js";
+
+function createRuntimeLookup(
+  syntheticAuthProviderRefs: readonly string[] = [],
+): RuntimeProviderAuthLookup {
+  return {
+    envApiKey: {
+      aliasMap: {},
+      candidateMap: {},
+      authEvidenceMap: {},
+    },
+    syntheticAuthProviderRefs,
+  };
+}
+
+const modelAuthMock = vi.hoisted(() => ({
+  createRuntimeProviderAuthLookup: vi.fn(() => createRuntimeLookup()),
+  hasRuntimeAvailableProviderAuth: vi.fn(() => false),
+  resolveEnvApiKey: vi.fn(() => null),
+}));
+
+vi.mock("../model-auth.js", () => ({
+  createRuntimeProviderAuthLookup: modelAuthMock.createRuntimeProviderAuthLookup,
+  hasRuntimeAvailableProviderAuth: modelAuthMock.hasRuntimeAvailableProviderAuth,
+  resolveEnvApiKey: modelAuthMock.resolveEnvApiKey,
+}));
 
 describe("hasProviderAuthForTool", () => {
   afterEach(() => {
     vi.unstubAllEnvs();
+    vi.clearAllMocks();
+    modelAuthMock.createRuntimeProviderAuthLookup.mockReturnValue(createRuntimeLookup());
+    modelAuthMock.hasRuntimeAvailableProviderAuth.mockReturnValue(false);
+    modelAuthMock.resolveEnvApiKey.mockReturnValue(null);
   });
 
   it("accepts config-backed custom provider auth", () => {
@@ -19,6 +49,7 @@ describe("hasProviderAuthForTool", () => {
         },
       },
     } as OpenClawConfig;
+    modelAuthMock.hasRuntimeAvailableProviderAuth.mockReturnValue(true);
 
     expect(hasProviderAuthForTool({ provider: "hatchery", cfg })).toBe(true);
   });
@@ -43,5 +74,30 @@ describe("hasProviderAuthForTool", () => {
 
   it("rejects providers without config, env, or profile auth", () => {
     expect(hasProviderAuthForTool({ provider: "unconfigured-provider" })).toBe(false);
+  });
+
+  it("accepts scoped runtime provider auth", () => {
+    const cfg = {} as OpenClawConfig;
+    const runtimeLookup = createRuntimeLookup(["codex"]);
+    modelAuthMock.createRuntimeProviderAuthLookup.mockReturnValue(runtimeLookup);
+    modelAuthMock.hasRuntimeAvailableProviderAuth.mockReturnValue(true);
+
+    expect(
+      hasProviderAuthForTool({
+        provider: "codex",
+        cfg,
+        workspaceDir: "/tmp/openclaw-workspace",
+      }),
+    ).toBe(true);
+    expect(modelAuthMock.createRuntimeProviderAuthLookup).toHaveBeenCalledWith({
+      cfg,
+      workspaceDir: "/tmp/openclaw-workspace",
+    });
+    expect(modelAuthMock.hasRuntimeAvailableProviderAuth).toHaveBeenCalledWith({
+      provider: "codex",
+      cfg,
+      workspaceDir: "/tmp/openclaw-workspace",
+      runtimeLookup,
+    });
   });
 });

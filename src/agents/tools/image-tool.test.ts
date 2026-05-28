@@ -71,6 +71,50 @@ const imageProviderHarness = vi.hoisted(() => {
   };
 });
 
+const modelAuthEnvMock = vi.hoisted(() => ({
+  envVarByProvider: {
+    anthropic: ["ANTHROPIC_API_KEY", "ANTHROPIC_OAUTH_TOKEN"],
+    minimax: ["MINIMAX_API_KEY", "MINIMAX_OAUTH_TOKEN"],
+    "minimax-portal": ["MINIMAX_OAUTH_TOKEN"],
+    moonshot: ["MOONSHOT_API_KEY"],
+    openai: ["OPENAI_API_KEY"],
+    opencode: ["OPENCODE_API_KEY", "OPENCODE_ZEN_API_KEY"],
+    "opencode-go": ["OPENCODE_API_KEY", "OPENCODE_ZEN_API_KEY"],
+    openrouter: ["OPENROUTER_API_KEY"],
+    zai: ["ZAI_API_KEY", "Z_AI_API_KEY"],
+  } as Record<string, string[]>,
+}));
+
+function createDefaultImageModelMap(): Map<string, string> {
+  return new Map<string, string>([
+    ["anthropic", "claude-opus-4-6"],
+    ["minimax", "MiniMax-VL-01"],
+    ["minimax-cn", "MiniMax-VL-01"],
+    ["minimax-portal", "MiniMax-VL-01"],
+    ["minimax-portal-cn", "MiniMax-VL-01"],
+    ["codex", "gpt-5.5"],
+    ["openai", "gpt-5.4-mini"],
+    ["opencode", "gpt-5-nano"],
+    ["opencode-go", "kimi-k2.6"],
+    ["zai", "glm-4.6v"],
+  ]);
+}
+
+function makeOpenAiCodexAuthStore() {
+  return {
+    version: 1,
+    profiles: {
+      "openai-codex:test": {
+        type: "oauth",
+        provider: "openai-codex",
+        access: "codex-oauth-token",
+        refresh: "codex-refresh-token",
+        expires: Date.now() + 60_000,
+      },
+    },
+  } as const;
+}
+
 vi.mock("../bash-tools.js", async () => {
   const actual = await vi.importActual<typeof import("../bash-tools.js")>("../bash-tools.js");
   return {
@@ -150,24 +194,38 @@ vi.mock("../auth-profiles.js", () => ({
 }));
 
 vi.mock("../model-auth.js", () => ({
-  hasUsableCustomProviderApiKey: (cfg?: OpenClawConfig, provider?: string) => {
+  createRuntimeProviderAuthLookup: () => ({
+    envApiKey: {
+      aliasMap: {},
+      candidateMap: {},
+      authEvidenceMap: {},
+    },
+    syntheticAuthProviderRefs: [],
+  }),
+  hasRuntimeAvailableProviderAuth: ({
+    provider,
+    cfg,
+    allowPluginSyntheticAuth,
+  }: {
+    provider: string;
+    cfg?: OpenClawConfig;
+    allowPluginSyntheticAuth?: boolean;
+  }) => {
     const providerConfig = cfg?.models?.providers?.[provider ?? ""];
     const apiKey = providerConfig?.apiKey;
-    return typeof apiKey === "string" && apiKey.trim().length > 0;
+    if (typeof apiKey === "string" && apiKey.trim().length > 0) {
+      return true;
+    }
+    if (provider === "codex" && allowPluginSyntheticAuth !== false) {
+      return true;
+    }
+    return (modelAuthEnvMock.envVarByProvider[provider] ?? []).some((key) => {
+      const value = process.env[key];
+      return typeof value === "string" && value.length > 0;
+    });
   },
   resolveEnvApiKey: (provider: string) => {
-    const envVarByProvider: Record<string, string[]> = {
-      anthropic: ["ANTHROPIC_API_KEY", "ANTHROPIC_OAUTH_TOKEN"],
-      minimax: ["MINIMAX_API_KEY", "MINIMAX_OAUTH_TOKEN"],
-      "minimax-portal": ["MINIMAX_OAUTH_TOKEN"],
-      moonshot: ["MOONSHOT_API_KEY"],
-      openai: ["OPENAI_API_KEY"],
-      opencode: ["OPENCODE_API_KEY", "OPENCODE_ZEN_API_KEY"],
-      "opencode-go": ["OPENCODE_API_KEY", "OPENCODE_ZEN_API_KEY"],
-      openrouter: ["OPENROUTER_API_KEY"],
-      zai: ["ZAI_API_KEY", "Z_AI_API_KEY"],
-    };
-    const envVar = (envVarByProvider[provider] ?? []).find((key) => {
+    const envVar = (modelAuthEnvMock.envVarByProvider[provider] ?? []).find((key) => {
       const value = process.env[key];
       return typeof value === "string" && value.length > 0;
     });
@@ -215,17 +273,7 @@ async function writeAuthProfiles(agentDir: string, profiles: unknown) {
 }
 
 async function createOpenClawCodingToolsWithFreshModules(options?: CreateOpenClawCodingToolsArgs) {
-  const defaultImageModels = new Map<string, string>([
-    ["anthropic", "claude-opus-4-6"],
-    ["minimax", "MiniMax-VL-01"],
-    ["minimax-cn", "MiniMax-VL-01"],
-    ["minimax-portal", "MiniMax-VL-01"],
-    ["minimax-portal-cn", "MiniMax-VL-01"],
-    ["openai", "gpt-5.4-mini"],
-    ["opencode", "gpt-5-nano"],
-    ["opencode-go", "kimi-k2.6"],
-    ["zai", "glm-4.6v"],
-  ]);
+  const defaultImageModels = createDefaultImageModelMap();
   testing.setProviderDepsForTest({
     buildProviderRegistry: (overrides?: Record<string, MediaUnderstandingProvider>) =>
       imageProviderHarness.buildProviderRegistry(overrides),
@@ -577,17 +625,7 @@ function installImageUnderstandingProviderDeps(
   },
 ) {
   imageProviderHarness.setProviders(providers);
-  const defaultImageModels = new Map<string, string>([
-    ["anthropic", "claude-opus-4-6"],
-    ["minimax", "MiniMax-VL-01"],
-    ["minimax-cn", "MiniMax-VL-01"],
-    ["minimax-portal", "MiniMax-VL-01"],
-    ["minimax-portal-cn", "MiniMax-VL-01"],
-    ["openai", "gpt-5.4-mini"],
-    ["opencode", "gpt-5-nano"],
-    ["opencode-go", "kimi-k2.6"],
-    ["zai", "glm-4.6v"],
-  ]);
+  const defaultImageModels = createDefaultImageModelMap();
   testing.setProviderDepsForTest({
     buildProviderRegistry: (overrides?: Record<string, MediaUnderstandingProvider>) =>
       imageProviderHarness.buildProviderRegistry(overrides),
@@ -811,6 +849,97 @@ describe("image tool implicit imageModel config", () => {
     });
   });
 
+  it("selects bounded Codex image understanding for OpenAI GPT models with Codex OAuth only", async () => {
+    await withTempAgentDir(async (agentDir) => {
+      const defaultImageModels = new Map<string, string>([
+        ["codex", "gpt-5.5"],
+        ["openai", "gpt-5.4-mini"],
+      ]);
+      testing.setProviderDepsForTest({
+        buildProviderRegistry: (overrides?: Record<string, MediaUnderstandingProvider>) =>
+          imageProviderHarness.buildProviderRegistry(overrides),
+        getMediaUnderstandingProvider: (
+          id: string,
+          registry: Map<string, MediaUnderstandingProvider>,
+        ) => imageProviderHarness.getMediaUnderstandingProvider(id, registry),
+        describeImageWithModel: describeGenericImageWithModel,
+        describeImagesWithModel: describeGenericImagesWithModel,
+        resolveAutoMediaKeyProviders: ({ capability }) =>
+          capability === "image" ? ["openai"] : [],
+        resolveDefaultMediaModel: ({ providerId, capability }) =>
+          capability === "image" ? defaultImageModels.get(providerId.toLowerCase()) : undefined,
+      });
+      const cfg: OpenClawConfig = {
+        agents: { defaults: { model: { primary: "openai/gpt-5.5" } } },
+      };
+      const authStore = makeOpenAiCodexAuthStore();
+
+      expect(resolveImageModelConfigForTool({ cfg, agentDir, authStore })).toEqual({
+        primary: "codex/gpt-5.5",
+      });
+    });
+  });
+
+  it("keeps direct OpenAI image understanding when OpenAI API auth is available", async () => {
+    await withTempAgentDir(async (agentDir) => {
+      vi.stubEnv("OPENAI_API_KEY", "openai-test");
+      testing.setProviderDepsForTest({
+        buildProviderRegistry: (overrides?: Record<string, MediaUnderstandingProvider>) =>
+          imageProviderHarness.buildProviderRegistry(overrides),
+        getMediaUnderstandingProvider: (
+          id: string,
+          registry: Map<string, MediaUnderstandingProvider>,
+        ) => imageProviderHarness.getMediaUnderstandingProvider(id, registry),
+        describeImageWithModel: describeGenericImageWithModel,
+        describeImagesWithModel: describeGenericImagesWithModel,
+        resolveAutoMediaKeyProviders: ({ capability }) =>
+          capability === "image" ? ["openai"] : [],
+        resolveDefaultMediaModel: ({ providerId, capability }) =>
+          capability === "image" && providerId === "openai" ? "gpt-5.4-mini" : undefined,
+      });
+      const cfg: OpenClawConfig = {
+        agents: { defaults: { model: { primary: "openai/gpt-5.5" } } },
+      };
+      const authStore = makeOpenAiCodexAuthStore();
+
+      expect(resolveImageModelConfigForTool({ cfg, agentDir, authStore })).toEqual({
+        primary: "openai/gpt-5.4-mini",
+      });
+    });
+  });
+
+  it("does not preempt other authenticated image providers with Codex", async () => {
+    await withTempAgentDir(async (agentDir) => {
+      vi.stubEnv("ANTHROPIC_API_KEY", "anthropic-test");
+      const defaultImageModels = new Map<string, string>([
+        ["anthropic", "claude-opus-4-6"],
+        ["codex", "gpt-5.5"],
+        ["openai", "gpt-5.4-mini"],
+      ]);
+      testing.setProviderDepsForTest({
+        buildProviderRegistry: (overrides?: Record<string, MediaUnderstandingProvider>) =>
+          imageProviderHarness.buildProviderRegistry(overrides),
+        getMediaUnderstandingProvider: (
+          id: string,
+          registry: Map<string, MediaUnderstandingProvider>,
+        ) => imageProviderHarness.getMediaUnderstandingProvider(id, registry),
+        describeImageWithModel: describeGenericImageWithModel,
+        describeImagesWithModel: describeGenericImagesWithModel,
+        resolveAutoMediaKeyProviders: ({ capability }) =>
+          capability === "image" ? ["openai", "anthropic"] : [],
+        resolveDefaultMediaModel: ({ providerId, capability }) =>
+          capability === "image" ? defaultImageModels.get(providerId.toLowerCase()) : undefined,
+      });
+      const cfg: OpenClawConfig = {
+        agents: { defaults: { model: { primary: "openai/gpt-5.5" } } },
+      };
+
+      expect(resolveImageModelConfigForTool({ cfg, agentDir })).toEqual({
+        primary: "anthropic/claude-opus-4-6",
+      });
+    });
+  });
+
   it("defers implicit image model discovery during hot-path tool registration", async () => {
     await withTempAgentDir(async (agentDir) => {
       const resolveDefaultMediaModelSpy = vi.fn(() => "gpt-5.4-mini");
@@ -873,6 +1002,56 @@ describe("image tool implicit imageModel config", () => {
       expect(request.provider).toBe("opencode-go");
       expect(request.model).toBe("mimo-v2-omni");
       expectToolText(result, "ok opencode-go/mimo-v2-omni");
+    });
+  });
+
+  it("lets bare per-call model overrides inherit the bounded Codex image route", async () => {
+    await withTempAgentDir(async (agentDir) => {
+      const fetch = vi.fn().mockResolvedValue({
+        headers: new Headers({ "content-type": "application/json" }),
+        json: async () => ({ content: "ok codex" }),
+      });
+      global.fetch = withFetchPreconnect(fetch);
+      testing.setProviderDepsForTest({
+        buildProviderRegistry: (overrides?: Record<string, MediaUnderstandingProvider>) =>
+          imageProviderHarness.buildProviderRegistry(overrides),
+        getMediaUnderstandingProvider: (
+          id: string,
+          registry: Map<string, MediaUnderstandingProvider>,
+        ) => imageProviderHarness.getMediaUnderstandingProvider(id, registry),
+        describeImageWithModel: describeGenericImageWithModel,
+        describeImagesWithModel: describeGenericImagesWithModel,
+        resolveAutoMediaKeyProviders: ({ capability }) =>
+          capability === "image" ? ["openai"] : [],
+        resolveDefaultMediaModel: ({ providerId, capability }) => {
+          if (capability !== "image") {
+            return undefined;
+          }
+          return providerId === "codex" ? "gpt-5.5" : "gpt-5.4-mini";
+        },
+      });
+      const cfg: OpenClawConfig = {
+        agents: { defaults: { model: { primary: "openai/gpt-5.5" } } },
+      };
+      const authStore = makeOpenAiCodexAuthStore();
+      const tool = createRequiredImageTool({
+        config: cfg,
+        agentDir,
+        authProfileStore: authStore,
+        deferAutoModelResolution: true,
+      });
+
+      const result = await tool.execute("t1", {
+        prompt: "Describe this image.",
+        image: `data:image/png;base64,${ONE_PIXEL_PNG_B64}`,
+        model: "gpt-5.4",
+      });
+
+      expectToolText(result, "ok codex");
+      expect(JSON.parse(String(fetch.mock.calls[0]?.[1]?.body))).toMatchObject({
+        provider: "codex",
+        model: "gpt-5.4",
+      });
     });
   });
 
@@ -1653,7 +1832,11 @@ describe("image tool implicit imageModel config", () => {
             type: "array",
             items: { type: "string" },
           },
-          model: { type: "string" },
+          model: {
+            description:
+              "Optional provider/model override. Usually omit so OpenClaw uses agents.defaults.imageModel. Use codex/gpt-* for bounded Codex image understanding.",
+            type: "string",
+          },
           maxBytesMb: { type: "number" },
           maxImages: { type: "number" },
         },
@@ -2792,18 +2975,44 @@ describe("image compression policy", () => {
     });
   });
 
-  it("resolves providerless overrides before reading compression metadata", async () => {
+  it("resolves providerless overrides against the configured media route for compression", async () => {
+    const cfg = {
+      ...cfgWithImageModelMetadata,
+      models: {
+        providers: {
+          ...cfgWithImageModelMetadata.models.providers,
+          codex: {
+            baseUrl: "https://codex.example.invalid",
+            models: [
+              {
+                id: "gpt-5.5",
+                name: "Codex GPT-5.5",
+                reasoning: true,
+                input: ["text", "image"],
+                contextWindow: 200_000,
+                maxTokens: 128_000,
+                cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+                mediaInput: {
+                  image: { maxSidePx: 4096, preferredSidePx: 2048, tokenMode: "provider" },
+                },
+              },
+            ],
+          },
+        },
+      },
+    } satisfies OpenClawConfig;
+
     await expect(
       testing.resolveImageCompressionPolicy({
-        cfg: cfgWithImageModelMetadata,
+        cfg,
         imageModelConfig: {
-          primary: "anthropic/claude-opus-4-6",
+          primary: "codex/gpt-5.5",
         },
         modelOverride: "gpt-5.5",
         imageCount: 1,
       }),
     ).resolves.toMatchObject({
-      models: [{ maxSidePx: 6000, preferredSidePx: 2048, tokenMode: "detail" }],
+      models: [{ maxSidePx: 4096, preferredSidePx: 2048, tokenMode: "provider" }],
     });
   });
 });

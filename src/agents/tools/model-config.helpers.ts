@@ -14,8 +14,14 @@ import {
 } from "../auth-profiles.js";
 import type { AuthProfileCredential, AuthProfileStore } from "../auth-profiles/types.js";
 import { DEFAULT_MODEL, DEFAULT_PROVIDER } from "../defaults.js";
-import { hasUsableCustomProviderApiKey, resolveEnvApiKey } from "../model-auth.js";
+import {
+  createRuntimeProviderAuthLookup,
+  hasRuntimeAvailableProviderAuth,
+  resolveEnvApiKey,
+  type RuntimeProviderAuthLookup,
+} from "../model-auth.js";
 import { resolveConfiguredModelRef } from "../model-selection.js";
+import { normalizeProviderId } from "../provider-id.js";
 
 export type ToolModelConfig = { primary?: string; fallbacks?: string[]; timeoutMs?: number };
 
@@ -85,7 +91,24 @@ export function hasProviderAuthForTool(params: {
   workspaceDir?: string;
   agentDir?: string;
   authStore?: AuthProfileStore;
+  runtimeAuthLookup?: RuntimeProviderAuthLookup;
 }): boolean {
+  const provider = normalizeProviderId(params.provider);
+  if (
+    hasRuntimeAvailableProviderAuth({
+      provider,
+      cfg: params.cfg,
+      workspaceDir: params.workspaceDir,
+      runtimeLookup:
+        params.runtimeAuthLookup ??
+        createRuntimeProviderAuthLookup({
+          cfg: params.cfg,
+          workspaceDir: params.workspaceDir,
+        }),
+    })
+  ) {
+    return true;
+  }
   if (
     hasAuthForProvider({
       provider: params.provider,
@@ -95,7 +118,90 @@ export function hasProviderAuthForTool(params: {
   ) {
     return true;
   }
-  return hasUsableCustomProviderApiKey(params.cfg, params.provider);
+  return false;
+}
+
+function isOpenAiGptModelRef(ref: { provider: string; model: string }): boolean {
+  return (
+    normalizeProviderId(ref.provider) === "openai" &&
+    ref.model.trim().toLowerCase().startsWith("gpt-")
+  );
+}
+
+function hasDirectOpenAiAuthForTool(params: {
+  cfg?: OpenClawConfig;
+  agentDir: string;
+  workspaceDir?: string;
+  authStore?: AuthProfileStore;
+}): boolean {
+  if (
+    hasRuntimeAvailableProviderAuth({
+      provider: "openai",
+      cfg: params.cfg,
+      workspaceDir: params.workspaceDir,
+      allowPluginSyntheticAuth: false,
+      runtimeLookup: createRuntimeProviderAuthLookup({
+        cfg: params.cfg,
+        workspaceDir: params.workspaceDir,
+        includePluginSyntheticAuth: false,
+      }),
+    })
+  ) {
+    return true;
+  }
+  return hasAuthProfileForProvider({
+    provider: "openai",
+    agentDir: params.agentDir,
+    authStore: params.authStore,
+  });
+}
+
+export function resolveCodexMediaCandidateForOpenAiCodexRoute(params: {
+  cfg?: OpenClawConfig;
+  primary: { provider: string; model: string };
+  agentDir: string;
+  workspaceDir?: string;
+  authStore?: AuthProfileStore;
+  resolveDefaultMediaModel: (params: {
+    cfg?: OpenClawConfig;
+    workspaceDir?: string;
+    providerId: string;
+    capability: "image";
+  }) => string | undefined;
+}): string | null {
+  if (!isOpenAiGptModelRef(params.primary)) {
+    return null;
+  }
+  if (hasDirectOpenAiAuthForTool(params)) {
+    return null;
+  }
+  if (
+    !hasAuthProfileForProvider({
+      provider: "openai-codex",
+      agentDir: params.agentDir,
+      authStore: params.authStore,
+    })
+  ) {
+    return null;
+  }
+  if (
+    !hasProviderAuthForTool({
+      provider: "codex",
+      cfg: params.cfg,
+      workspaceDir: params.workspaceDir,
+      agentDir: params.agentDir,
+      authStore: params.authStore,
+    })
+  ) {
+    return null;
+  }
+  const modelId = params.resolveDefaultMediaModel({
+    cfg: params.cfg,
+    workspaceDir: params.workspaceDir,
+    providerId: "codex",
+    capability: "image",
+  });
+  return modelId ? `codex/${modelId}` : null;
 }
 
 export function coerceToolModelConfig(model?: AgentToolModelConfig): ToolModelConfig {
@@ -122,6 +228,10 @@ export function buildToolModelConfigFromCandidates(params: {
     return params.explicit;
   }
 
+  const runtimeAuthLookup = createRuntimeProviderAuthLookup({
+    cfg: params.cfg,
+    workspaceDir: params.workspaceDir,
+  });
   const deduped: string[] = [];
   for (const candidate of params.candidates) {
     const trimmed = candidate?.trim();
@@ -137,6 +247,7 @@ export function buildToolModelConfigFromCandidates(params: {
         workspaceDir: params.workspaceDir,
         agentDir: params.agentDir,
         authStore: params.authStore,
+        runtimeAuthLookup,
       });
     if (!provider || !providerConfigured) {
       continue;

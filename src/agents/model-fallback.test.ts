@@ -2698,6 +2698,20 @@ describe("runWithImageModelFallback", () => {
         expected: [["openai-codex", "gpt-5.4-mini"]],
       },
       {
+        name: "bare override inherits bounded Codex image provider",
+        cfg: makeCfg({
+          agents: {
+            defaults: {
+              imageModel: {
+                primary: "codex/gpt-5.5",
+              },
+            },
+          },
+        }),
+        modelOverride: "gpt-5.5",
+        expected: [["codex", "gpt-5.5"]],
+      },
+      {
         name: "qualified override keeps provider",
         cfg: makeCfg({
           agents: {
