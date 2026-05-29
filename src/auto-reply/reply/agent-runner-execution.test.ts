@@ -6476,7 +6476,7 @@ describe("runAgentTurnWithFallback", () => {
         attempts: [],
       }),
     );
-    state.runEmbeddedPiAgentMock.mockResolvedValue({
+    state.runEmbeddedAgentMock.mockResolvedValue({
       payloads: [{ text: "ok" }],
       meta: {},
     });
