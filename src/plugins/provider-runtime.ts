@@ -552,11 +552,30 @@ export function resolveProviderStreamFn(params: {
   allowRuntimePluginLoad?: boolean;
   context: ProviderCreateStreamFnContext;
 }) {
-  const plugin =
+  const resolvePlugin =
     params.allowRuntimePluginLoad === false
-      ? resolveLoadedProviderRuntimePlugin(params)
-      : resolveProviderRuntimePlugin(params);
-  return plugin?.createStreamFn?.(params.context) ?? undefined;
+      ? resolveLoadedProviderRuntimePlugin
+      : resolveProviderRuntimePlugin;
+  const plugin = resolvePlugin(params);
+  const streamFn = plugin?.createStreamFn?.(params.context);
+  if (streamFn) {
+    return streamFn;
+  }
+
+  const modelApi =
+    typeof params.context.model?.api === "string"
+      ? normalizeProviderId(params.context.model.api)
+      : "";
+  if (!modelApi || modelApi === normalizeProviderId(params.provider)) {
+    return undefined;
+  }
+
+  return (
+    resolvePlugin({
+      ...params,
+      provider: modelApi,
+    })?.createStreamFn?.(params.context) ?? undefined
+  );
 }
 
 export function resolveProviderTransportTurnStateWithPlugin(params: {
@@ -802,12 +821,11 @@ export function resolveProviderSyntheticAuthWithPlugin(params: {
   env?: NodeJS.ProcessEnv;
   context: ProviderResolveSyntheticAuthContext;
   modelApi?: string;
+  providerRefs?: string[];
 }) {
-  const providerRefs = resolveProviderHookRefs(
-    params.provider,
-    params.context.providerConfig,
-    params.modelApi,
-  );
+  const providerRefs =
+    params.providerRefs ??
+    resolveProviderHookRefs(params.provider, params.context.providerConfig, params.modelApi);
   const discoveryPluginIds = [
     ...new Set(
       providerRefs.flatMap(
@@ -941,12 +959,11 @@ export function shouldDeferProviderSyntheticProfileAuthWithPlugin(params: {
   env?: NodeJS.ProcessEnv;
   context: ProviderDeferSyntheticProfileAuthContext;
   modelApi?: string;
+  providerRefs?: string[];
 }) {
-  const providerRefs = resolveProviderHookRefs(
-    params.provider,
-    params.context.providerConfig,
-    params.modelApi,
-  );
+  const providerRefs =
+    params.providerRefs ??
+    resolveProviderHookRefs(params.provider, params.context.providerConfig, params.modelApi);
   for (const providerRef of providerRefs) {
     const resolved = resolveProviderRuntimePlugin({
       ...params,

@@ -437,7 +437,7 @@ describe("provider-runtime", () => {
   });
 
   it("derives model refs from runtime hook contexts", () => {
-    const createStreamFn = vi.fn();
+    const createStreamFn = vi.fn(() => vi.fn() as never);
     resolvePluginProvidersMock.mockReturnValue([
       {
         id: "anthropic",
@@ -594,6 +594,47 @@ describe("provider-runtime", () => {
     ).toBeTypeOf("function");
     expect(createStreamFn).toHaveBeenCalledOnce();
     expect(resolvePluginProvidersMock).not.toHaveBeenCalled();
+  });
+
+  it("uses the selected model api owner for stream hooks when the configured provider differs", () => {
+    const createStreamFn = vi.fn(() => vi.fn());
+    const provider: ProviderPlugin = {
+      id: "ollama",
+      label: "Ollama",
+      auth: [],
+      createStreamFn,
+    };
+    resolvePluginProvidersMock.mockImplementation((params) => {
+      const providerRefs = (params as { providerRefs?: string[] }).providerRefs ?? [];
+      return providerRefs.includes("ollama") ? [provider] : [];
+    });
+
+    expect(
+      resolveProviderStreamFn({
+        provider: "custom-router",
+        config: {
+          models: {
+            providers: {
+              "custom-router": {
+                api: "openai-completions",
+                baseUrl: "https://router.example/v1",
+                models: [],
+              },
+            },
+          },
+        } as never,
+        context: createDemoResolvedModelContext({
+          provider: "custom-router",
+          model: {
+            ...MODEL,
+            provider: "custom-router",
+            api: "ollama",
+            baseUrl: "http://127.0.0.1:11434",
+          },
+        }),
+      }),
+    ).toBeTypeOf("function");
+    expect(createStreamFn).toHaveBeenCalledOnce();
   });
 
   it("does not load runtime plugins for stream hooks when loading is disabled", () => {
