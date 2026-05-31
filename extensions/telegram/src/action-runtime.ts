@@ -35,6 +35,7 @@ import {
   resolveTelegramTargetChatType,
 } from "./inline-buttons.js";
 import { resolveTelegramInteractiveTextFallback } from "./interactive-fallback.js";
+import { recordTelegramPollRegistryEntry } from "./poll-registry.js";
 import { resolveTelegramPollVisibility } from "./poll-visibility.js";
 import { resolveTelegramReactionLevel } from "./reaction-level.js";
 import {
@@ -617,6 +618,16 @@ export async function handleTelegramAction(
         gatewayClientScopes: options?.gatewayClientScopes,
       },
     );
+    if (result.pollId && isAnonymous === false) {
+      await recordTelegramPollRegistryEntry({
+        accountId: accountId ?? undefined,
+        pollId: result.pollId,
+        chatId: result.chatId,
+        messageThreadId: messageThreadId ?? undefined,
+        question,
+        options: answers,
+      });
+    }
     notifyVisibleOutboundSuccess(to, messageThreadId);
     return jsonResult({
       ok: true,
