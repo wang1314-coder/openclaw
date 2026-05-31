@@ -1999,6 +1999,13 @@ function stripOpenAICodexResponsesUnsupportedTextFields(params: Record<string, u
   }
 }
 
+function stripOpenAICodexResponsesEncryptedContentFields(params: Record<string, unknown>): void {
+  const stripped = stripEncryptedContentFields(params.input);
+  if (stripped.changed) {
+    params.input = stripped.value;
+  }
+}
+
 function sanitizeOpenAICodexResponsesParams<T extends Record<string, unknown>>(
   model: Model,
   params: T,
@@ -2010,6 +2017,7 @@ function sanitizeOpenAICodexResponsesParams<T extends Record<string, unknown>>(
     delete params[key];
   }
   stripOpenAICodexResponsesUnsupportedTextFields(params);
+  stripOpenAICodexResponsesEncryptedContentFields(params);
   return params;
 }
 
