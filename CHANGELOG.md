@@ -13,6 +13,10 @@ Docs: https://docs.openclaw.ai
 - Workboard, SecretRef plugin manifests, hosted iOS push relay, and external Copilot/Tokenjuice packaging add broader orchestration, integration, and plugin delivery surfaces. (#82326, #87469, #87796, #88107, #88117)
 - Release, CI, Docker, E2E, and diagnostics lanes now cap more logs, response bodies, readiness probes, artifact checks, and status polling so failures report bounded proof instead of stalling.
 
+### Features
+
+- Control UI: dynamically set `document.title` to the active agent's name (e.g. `Milly · OpenClaw`) so multi-agent operators can disambiguate Control UI tabs in the browser tab strip and Cmd-` switcher. Falls back to agent id, then `Control`, when no identity is loaded. Composes with the in-flight static `gateway.controlUi.title` work in PR #51067 (config title will take precedence once wired). Adds an Appearance › Browser tab toggle (default: Agent name) so users who prefer the static `OpenClaw Control` title can opt out, persisted in the existing UI settings store. Fixes #80942.
+
 ### Changes
 
 - Skills: let the `skill_research` agent tool apply, reject, and quarantine explicit Skill Workshop proposals through the guarded proposal lifecycle. Thanks @shakkernerd.

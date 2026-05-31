@@ -95,6 +95,7 @@ export type UiSettings = {
   navGroupsCollapsed: Record<string, boolean>; // Which nav groups are collapsed
   recentSessionsCollapsed?: boolean; // Collapse recent sessions list in sidebar
   borderRadius: number; // Corner roundness (0–100, default 50)
+  documentTitleSyncEnabled: boolean; // When true, document.title follows the active agent name.
   textScale?: TextScaleStop; // Browser-local text scale percentage
   customTheme?: ImportedCustomTheme;
   locale?: string;
@@ -239,6 +240,7 @@ export function loadSettings(): UiSettings {
     navGroupsCollapsed: {},
     recentSessionsCollapsed: false,
     borderRadius: 50,
+    documentTitleSyncEnabled: true,
     textScale: 100,
   };
 
@@ -306,6 +308,10 @@ export function loadSettings(): UiSettings {
         parsed.borderRadius <= 100
           ? snapBorderRadius(parsed.borderRadius)
           : defaults.borderRadius,
+      documentTitleSyncEnabled:
+        typeof parsed.documentTitleSyncEnabled === "boolean"
+          ? parsed.documentTitleSyncEnabled
+          : defaults.documentTitleSyncEnabled,
       textScale: normalizeTextScale(parsed.textScale, defaults.textScale),
       customTheme: customTheme ?? undefined,
       locale: isSupportedLocale(parsed.locale) ? parsed.locale : undefined,
@@ -428,6 +434,7 @@ function persistSettings(next: UiSettings) {
     navGroupsCollapsed: next.navGroupsCollapsed,
     recentSessionsCollapsed: next.recentSessionsCollapsed ?? false,
     borderRadius: next.borderRadius,
+    documentTitleSyncEnabled: next.documentTitleSyncEnabled,
     textScale: normalizeTextScale(next.textScale),
     ...(next.customTheme ? { customTheme: next.customTheme } : {}),
     sessionsByGateway,
