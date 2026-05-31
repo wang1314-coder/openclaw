@@ -525,6 +525,28 @@ describe("resolveModel", () => {
       maxTokens: 8192,
     });
 
+    const runtimeHooks = createRuntimeHooks();
+    const prepareProviderDynamicModel = vi.fn(async () => {});
+    const reasoningEffortMap = {
+      off: "none",
+      minimal: "none",
+      low: "high",
+      medium: "high",
+      high: "high",
+      xhigh: "high",
+      adaptive: "high",
+      max: "high",
+    };
+    const normalizeProviderResolvedModelWithPlugin = vi.fn(({ context }) => ({
+      ...context.model,
+      compat: {
+        ...context.model.compat,
+        supportsStore: false,
+        supportsReasoningEffort: true,
+        maxTokensField: "max_tokens",
+        reasoningEffortMap,
+      },
+    }));
     const result = await resolveModelAsync(
       "mistral",
       "mistral-medium-3-5",
@@ -532,12 +554,17 @@ describe("resolveModel", () => {
       undefined,
       {
         allowBundledStaticCatalogFallback: true,
-        runtimeHooks: createRuntimeHooks(),
+        runtimeHooks: {
+          ...runtimeHooks,
+          normalizeProviderResolvedModelWithPlugin,
+          prepareProviderDynamicModel,
+        },
         skipAgentDiscovery: true,
       },
     );
 
-    expectRecordFields(expectResolvedModel(result), {
+    const model = expectResolvedModel(result);
+    expectRecordFields(model, {
       provider: "mistral",
       id: "mistral-medium-3-5",
       api: "openai-completions",
@@ -546,6 +573,22 @@ describe("resolveModel", () => {
       contextWindow: 262144,
       maxTokens: 8192,
     });
+    expect(model.compat).toMatchObject({
+      supportsStore: false,
+      supportsReasoningEffort: true,
+      maxTokensField: "max_tokens",
+      reasoningEffortMap,
+    });
+    expect(normalizeProviderResolvedModelWithPlugin).toHaveBeenCalledWith(
+      expect.objectContaining({
+        provider: "mistral",
+        context: expect.objectContaining({
+          provider: "mistral",
+          modelId: "mistral-medium-3-5",
+        }),
+      }),
+    );
+    expect(prepareProviderDynamicModel).not.toHaveBeenCalled();
     expect(resolveBundledStaticCatalogModelMock).toHaveBeenCalledWith({
       provider: "mistral",
       modelId: "mistral-medium-3-5",
