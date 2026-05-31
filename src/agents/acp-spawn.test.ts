@@ -1041,6 +1041,9 @@ describe("spawnAcpDirect", () => {
         list: [
           {
             id: "reviewer",
+            model: {
+              primary: "openai/gpt-5.5-mini",
+            },
             runtime: {
               type: "acp",
               acp: {
@@ -1069,7 +1072,55 @@ describe("spawnAcpDirect", () => {
     );
 
     expectAcceptedSpawn(result);
+    const initInput = expectInitializeSessionFields({
+      agent: "codex",
+      runtimeOptions: {
+        model: "openai/gpt-5.5-mini",
+      },
+    });
+    expect(initInput.sessionKey).toMatch(/^agent:codex:acp:/);
+  });
+
+  it("does not inherit configured alias model defaults for raw ACP harness ids", async () => {
+    replaceSpawnConfig({
+      ...createDefaultSpawnConfig(),
+      agents: {
+        list: [
+          {
+            id: "reviewer",
+            model: {
+              primary: "openai/gpt-5.5-mini",
+            },
+            runtime: {
+              type: "acp",
+              acp: {
+                agent: "codex",
+              },
+            },
+          },
+        ],
+        defaults: {
+          subagents: {
+            allowAgents: ["codex"],
+            maxSpawnDepth: 2,
+          },
+        },
+      },
+    });
+
+    const result = await spawnAcpDirect(
+      {
+        task: "Investigate flaky tests",
+        agentId: "codex",
+      },
+      {
+        agentSessionKey: "agent:main:main",
+      },
+    );
+
+    expectAcceptedSpawn(result);
     const initInput = expectInitializeSessionFields({ agent: "codex" });
+    expect(initInput.runtimeOptions).toBeUndefined();
     expect(initInput.sessionKey).toMatch(/^agent:codex:acp:/);
   });
 

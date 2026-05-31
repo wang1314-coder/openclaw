@@ -72,7 +72,12 @@ import {
   resolveAcpSpawnStreamLogPath,
   startAcpSpawnParentStreamRelay,
 } from "./acp-spawn-parent-stream.js";
-import { listAgentIds, resolveAgentConfig, resolveDefaultAgentId } from "./agent-scope.js";
+import {
+  listAgentIds,
+  resolveAgentConfig,
+  resolveAgentEffectiveModelPrimary,
+  resolveDefaultAgentId,
+} from "./agent-scope.js";
 import {
   findAcpUnsupportedInheritedToolAllow,
   findAcpUnsupportedInheritedToolDeny,
@@ -471,6 +476,20 @@ function resolveTargetAcpAgentId(params: {
     error:
       "ACP target agent is not configured. Pass `agentId` in `sessions_spawn` or set `acp.defaultAgent` in config.",
   };
+}
+
+function resolveConfiguredAcpRuntimeAliasId(params: {
+  requestedAgentId?: string;
+  cfg: OpenClawConfig;
+}): string | undefined {
+  const requested = normalizeOptionalAgentId(params.requestedAgentId);
+  if (!requested) {
+    return undefined;
+  }
+  const configuredAgent = params.cfg.agents?.list?.find(
+    (agent) => normalizeOptionalAgentId(agent.id) === requested,
+  );
+  return configuredAgent?.runtime?.type === "acp" ? requested : undefined;
 }
 
 function isExplicitlyAllowedAcpAgent(cfg: OpenClawConfig, agentId: string): boolean {
@@ -1275,6 +1294,15 @@ export async function spawnAcpDirect(
     });
   }
   const targetAgentId = targetAgentResult.agentId;
+  const configuredAcpAliasId = resolveConfiguredAcpRuntimeAliasId({
+    requestedAgentId: params.agentId,
+    cfg,
+  });
+  const resolvedModel =
+    params.model ??
+    (configuredAcpAliasId
+      ? resolveAgentEffectiveModelPrimary(cfg, configuredAcpAliasId)
+      : undefined);
   const agentPolicyError = resolveAcpAgentPolicyError(cfg, targetAgentId);
   if (agentPolicyError) {
     return createAcpSpawnFailure({
@@ -1392,7 +1420,7 @@ export async function spawnAcpDirect(
       targetAgentId,
       runtimeMode,
       resumeSessionId: params.resumeSessionId,
-      model: params.model,
+      model: resolvedModel,
       thinking: params.thinking,
       runTimeoutSeconds: params.runTimeoutSeconds,
       cwd: runtimeCwd,
