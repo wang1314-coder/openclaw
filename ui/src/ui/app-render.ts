@@ -2772,9 +2772,11 @@ export function renderApp(state: AppViewState) {
                 connected: state.connected,
                 canWrite: hasOperatorWriteAccess(auth),
                 canModelOverride: hasOperatorAdminAccess(auth),
-                pluginEnabled: isPluginEnabledInConfigSnapshot(state.configSnapshot, "workboard", {
-                  enabledByDefault: false,
-                }),
+                pluginEnabled: state.configSnapshot
+                  ? isPluginEnabledInConfigSnapshot(state.configSnapshot, "workboard", {
+                      enabledByDefault: false,
+                    })
+                  : null,
                 agentsList: state.agentsList,
                 sessions: state.sessionsResult?.sessions ?? [],
                 onOpenSession: (sessionKey) => {
