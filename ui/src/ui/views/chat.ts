@@ -181,6 +181,7 @@ export type ChatProps = {
   onCloseSidebar?: () => void;
   onSplitRatioChange?: (ratio: number) => void;
   onChatScroll?: (event: Event) => void;
+  onChatWheelIntent?: (event: WheelEvent) => void;
   basePath?: string;
   composerControls?: TemplateResult | typeof nothing | ReturnType<typeof guard>;
   workspaceFiles?: {
@@ -1618,6 +1619,7 @@ export function renderChat(props: ChatProps) {
         );
       })}
       @scroll=${handleChatThreadScroll}
+      @wheel=${props.onChatWheelIntent}
       @click=${handleCodeBlockCopy}
     >
       <div class="chat-thread-inner">

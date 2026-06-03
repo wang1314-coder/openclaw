@@ -537,6 +537,7 @@ export type AppViewState = {
     removeQueuedMessage: (id: string) => void;
     retryQueuedChatMessage: (id: string) => Promise<void>;
     handleChatScroll: (event: Event) => void;
+    handleChatWheelIntent: (event: WheelEvent) => void;
     resetToolStream: () => void;
     resetChatScroll: () => void;
     exportLogs: (lines: string[], label: string) => void;

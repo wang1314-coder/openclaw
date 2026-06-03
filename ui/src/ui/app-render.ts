@@ -3402,6 +3402,7 @@ export function renderApp(state: AppViewState) {
                     void refreshChat(state, { awaitHistory: true, scheduleScroll: false });
                   },
                   onChatScroll: (event) => state.handleChatScroll(event),
+                  onChatWheelIntent: (event) => state.handleChatWheelIntent(event),
                   getDraft: () => state.chatMessage,
                   onDraftChange: (next) => state.handleChatDraftChange(next),
                   onRequestUpdate: requestHostUpdate,
