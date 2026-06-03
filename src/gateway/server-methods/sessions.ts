@@ -78,6 +78,7 @@ import {
   resolveAgentIdFromSessionKey,
   toAgentStoreSessionKey,
 } from "../../routing/session-key.js";
+import { hasStaleAutoRuntimeAuthProfileSelection } from "../../sessions/model-overrides.js";
 import { ADMIN_SCOPE } from "../operator-scopes.js";
 import { resolveSessionKeyForRun } from "../server-session-key.js";
 import {
@@ -106,6 +107,7 @@ import {
   readSessionMessageCountAsync,
   readSessionPreviewItemsFromTranscript,
   resolveDeletedAgentIdFromSessionKey,
+  resolveSessionExpectedSelectedModelRef,
   resolveFreshestSessionEntryFromStoreKeys,
   resolveGatewaySessionStoreTarget,
   resolveGatewaySessionStoreTargetWithStore,
@@ -163,10 +165,15 @@ function filterSessionStoreToConfiguredAgents(
 
 function inheritSessionRuntimeSelection(
   parentEntry: SessionEntry | undefined,
+  expectedSelection: { provider: string; model: string; config?: OpenClawConfig },
 ): Partial<SessionEntry> {
   if (!parentEntry) {
     return {};
   }
+  const inheritRuntimeAuthSelection = !hasStaleAutoRuntimeAuthProfileSelection(
+    parentEntry,
+    expectedSelection,
+  );
   return {
     ...(parentEntry.providerOverride ? { providerOverride: parentEntry.providerOverride } : {}),
     ...(parentEntry.modelOverride ? { modelOverride: parentEntry.modelOverride } : {}),
@@ -176,9 +183,11 @@ function inheritSessionRuntimeSelection(
     ...(parentEntry.agentRuntimeOverride
       ? { agentRuntimeOverride: parentEntry.agentRuntimeOverride }
       : {}),
-    ...(parentEntry.modelProvider ? { modelProvider: parentEntry.modelProvider } : {}),
-    ...(parentEntry.model ? { model: parentEntry.model } : {}),
-    ...(typeof parentEntry.contextTokens === "number"
+    ...(inheritRuntimeAuthSelection && parentEntry.modelProvider
+      ? { modelProvider: parentEntry.modelProvider }
+      : {}),
+    ...(inheritRuntimeAuthSelection && parentEntry.model ? { model: parentEntry.model } : {}),
+    ...(inheritRuntimeAuthSelection && typeof parentEntry.contextTokens === "number"
       ? { contextTokens: parentEntry.contextTokens }
       : {}),
     ...(parentEntry.thinkingLevel ? { thinkingLevel: parentEntry.thinkingLevel } : {}),
@@ -187,12 +196,58 @@ function inheritSessionRuntimeSelection(
     ...(parentEntry.traceLevel ? { traceLevel: parentEntry.traceLevel } : {}),
     ...(parentEntry.reasoningLevel ? { reasoningLevel: parentEntry.reasoningLevel } : {}),
     ...(parentEntry.elevatedLevel ? { elevatedLevel: parentEntry.elevatedLevel } : {}),
-    ...(parentEntry.authProfileOverride
+    ...(inheritRuntimeAuthSelection && parentEntry.authProfileOverride
       ? { authProfileOverride: parentEntry.authProfileOverride }
       : {}),
-    ...(parentEntry.authProfileOverrideSource
+    ...(inheritRuntimeAuthSelection && parentEntry.authProfileOverrideSource
       ? { authProfileOverrideSource: parentEntry.authProfileOverrideSource }
       : {}),
+  };
+}
+
+function resolveParentExpectedRuntimeSelection(
+  cfg: OpenClawConfig,
+  parentEntry: SessionEntry | undefined,
+  agentId: string,
+  store?: Record<string, SessionEntry>,
+): { provider: string; model: string; config: OpenClawConfig } {
+  const defaultSelection = resolveSessionExpectedSelectedModelRef({ cfg, agentId });
+  const visited = new Set<string>();
+  let currentEntry = parentEntry;
+  let currentAgentId = agentId;
+
+  for (let depth = 0; currentEntry && depth < 8; depth += 1) {
+    const currentDefaultSelection = resolveSessionExpectedSelectedModelRef({
+      cfg,
+      agentId: currentAgentId,
+    });
+    const currentSelection = resolveSessionExpectedSelectedModelRef({
+      cfg,
+      entry: currentEntry,
+      agentId: currentAgentId,
+    });
+    if (
+      normalizeOptionalString(currentEntry.providerOverride) ||
+      normalizeOptionalString(currentEntry.modelOverride) ||
+      currentSelection.provider !== currentDefaultSelection.provider ||
+      currentSelection.model !== currentDefaultSelection.model
+    ) {
+      return { ...currentSelection, config: cfg };
+    }
+
+    const parentKey = normalizeOptionalString(currentEntry.parentSessionKey);
+    if (!parentKey || !store || visited.has(parentKey)) {
+      break;
+    }
+    visited.add(parentKey);
+    const parentStoreKey = resolveSessionStoreKey({ cfg, sessionKey: parentKey });
+    currentEntry = store[parentStoreKey] ?? store[parentKey];
+    currentAgentId = normalizeAgentId(resolveAgentIdFromSessionKey(parentStoreKey) ?? agentId);
+  }
+
+  return {
+    ...defaultSelection,
+    config: cfg,
   };
 }
 
@@ -1452,6 +1507,7 @@ export const sessionsHandlers: GatewayRequestHandlers = {
     let canonicalParentSessionKey: string | undefined;
     let parentSessionEntry: SessionEntry | undefined;
     let parentSelectedAgentId: string | undefined;
+    let parentAgentId: string | undefined;
     if (parentSessionKey) {
       const parentCanonicalKey = resolveSessionStoreKey({ cfg, sessionKey: parentSessionKey });
       if (parentCanonicalKey === "global") {
@@ -1480,6 +1536,11 @@ export const sessionsHandlers: GatewayRequestHandlers = {
       }
       canonicalParentSessionKey = parent.canonicalKey;
       parentSessionEntry = parent.entry;
+      parentAgentId = normalizeAgentId(
+        parentSelectedAgentId ??
+          resolveAgentIdFromSessionKey(canonicalParentSessionKey) ??
+          resolveDefaultAgentId(cfg),
+      );
     }
     if (
       canonicalParentSessionKey &&
@@ -1488,12 +1549,10 @@ export const sessionsHandlers: GatewayRequestHandlers = {
       !resolveOptionalInitialSessionMessage(p) &&
       cfg.session?.dmScope === "main"
     ) {
-      const parentAgentId = normalizeAgentId(
-        parentSelectedAgentId ??
-          resolveAgentIdFromSessionKey(canonicalParentSessionKey) ??
-          resolveDefaultAgentId(cfg),
-      );
-      const parentMainKey = resolveAgentMainSessionKey({ cfg, agentId: parentAgentId });
+      const parentMainKey = resolveAgentMainSessionKey({
+        cfg,
+        agentId: parentAgentId ?? resolveDefaultAgentId(cfg),
+      });
       if (canonicalParentSessionKey === parentMainKey) {
         const { performGatewaySessionReset } = await loadSessionsRuntimeModule();
         const resetResult = await performGatewaySessionReset({
@@ -1532,12 +1591,10 @@ export const sessionsHandlers: GatewayRequestHandlers = {
         canonicalParentSessionKey,
         parentSelectedAgentId ? { agentId: parentSelectedAgentId } : undefined,
       );
-      const parentAgentId = normalizeAgentId(
-        parentSelectedAgentId ??
-          resolveAgentIdFromSessionKey(canonicalParentSessionKey) ??
-          resolveDefaultAgentId(cfg),
+      const workspaceDir = resolveAgentWorkspaceDir(
+        cfg,
+        parentAgentId ?? resolveDefaultAgentId(cfg),
       );
-      const workspaceDir = resolveAgentWorkspaceDir(cfg, parentAgentId);
       if (hasInternalHookListeners("command", "new")) {
         const hookEvent = createInternalHookEvent("command", "new", canonicalParentSessionKey, {
           sessionEntry: parentEntry,
@@ -1595,7 +1652,15 @@ export const sessionsHandlers: GatewayRequestHandlers = {
       }
       const inheritedSelection = normalizeOptionalString(p.model)
         ? {}
-        : inheritSessionRuntimeSelection(parentSessionEntry);
+        : inheritSessionRuntimeSelection(
+            parentSessionEntry,
+            resolveParentExpectedRuntimeSelection(
+              cfg,
+              parentSessionEntry,
+              parentAgentId ?? targetAgentId,
+              store,
+            ),
+          );
       const nextEntry: SessionEntry = {
         ...patched.entry,
         ...inheritedSelection,

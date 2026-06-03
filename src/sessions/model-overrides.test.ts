@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import type { SessionEntry } from "../config/sessions.js";
 import {
   applyModelOverrideToSessionEntry,
+  clearStaleAutoRuntimeAuthProfileSelection,
+  hasStaleAutoRuntimeAuthProfileSelection,
   repairProviderWrappedModelOverride,
 } from "./model-overrides.js";
 
@@ -49,6 +51,77 @@ function contextBudgetStatus(params: {
     unwindowedMessageCount: 2,
   };
 }
+
+describe("stale auto runtime auth profile selection", () => {
+  it("treats legacy compaction-count auth provenance as auto-owned", () => {
+    const before = Date.now() - 5_000;
+    const entry: SessionEntry = {
+      sessionId: "sess-legacy-auto-auth",
+      updatedAt: before,
+      modelProvider: "deepseek",
+      model: "deepseek-v4-flash",
+      contextTokens: 64_000,
+      authProfileOverride: "deepseek:default",
+      authProfileOverrideCompactionCount: 2,
+    };
+
+    const isStale = hasStaleAutoRuntimeAuthProfileSelection(entry, {
+      provider: "minimax",
+      model: "MiniMax-M2.7",
+    });
+    const result = clearStaleAutoRuntimeAuthProfileSelection(entry, {
+      provider: "minimax",
+      model: "MiniMax-M2.7",
+    });
+
+    expect(isStale).toBe(true);
+    expect(result.updated).toBe(true);
+    expect(entry.modelProvider).toBeUndefined();
+    expect(entry.model).toBeUndefined();
+    expect(entry.contextTokens).toBeUndefined();
+    expect(entry.authProfileOverride).toBeUndefined();
+    expect(entry.authProfileOverrideCompactionCount).toBeUndefined();
+    expect((entry.updatedAt ?? 0) > before).toBe(true);
+  });
+
+  it("does not treat configured runtime-equivalent CLI aliases as stale", () => {
+    const entry: SessionEntry = {
+      sessionId: "sess-cli-runtime-alias",
+      updatedAt: Date.now(),
+      modelProvider: "claude-cli",
+      model: "claude-opus-4-7",
+      contextTokens: 200_000,
+      authProfileOverride: "claude-cli:default",
+      authProfileOverrideSource: "auto",
+    };
+    const config = {
+      agents: {
+        defaults: {
+          cliBackends: {
+            "claude-cli": { command: "claude" },
+          },
+        },
+      },
+    };
+
+    const isStale = hasStaleAutoRuntimeAuthProfileSelection(entry, {
+      provider: "anthropic",
+      model: "claude-opus-4-7",
+      config,
+    });
+    const result = clearStaleAutoRuntimeAuthProfileSelection(entry, {
+      provider: "anthropic",
+      model: "claude-opus-4-7",
+      config,
+    });
+
+    expect(isStale).toBe(false);
+    expect(result.updated).toBe(false);
+    expect(entry.modelProvider).toBe("claude-cli");
+    expect(entry.model).toBe("claude-opus-4-7");
+    expect(entry.authProfileOverride).toBe("claude-cli:default");
+  });
+});
 
 describe("applyModelOverrideToSessionEntry", () => {
   it("clears stale runtime model fields when switching overrides", () => {
@@ -174,6 +247,42 @@ describe("applyModelOverrideToSessionEntry", () => {
     expect(entry.providerOverride).toBeUndefined();
     expect(entry.modelOverride).toBeUndefined();
     expect(entry.modelOverrideSource).toBeUndefined();
+    expect(entry.contextTokens).toBeUndefined();
+    expect(entry.contextBudgetStatus).toBeUndefined();
+    expect((entry.updatedAt ?? 0) > before).toBe(true);
+  });
+
+  it("clears stale runtime model fields when selecting the default model", () => {
+    const before = Date.now() - 5_000;
+    const entry: SessionEntry = {
+      sessionId: "sess-default-runtime",
+      updatedAt: before,
+      modelProvider: "opencode-go",
+      model: "deepseek-v4-pro",
+      contextTokens: 64_000,
+      contextBudgetStatus: contextBudgetStatus({
+        updatedAt: before,
+        provider: "opencode-go",
+        model: "deepseek-v4-pro",
+        contextTokenBudget: 64_000,
+      }),
+    };
+
+    const result = applyModelOverrideToSessionEntry({
+      entry,
+      selection: {
+        provider: "opencode-go",
+        model: "qwen3.6-plus",
+        isDefault: true,
+      },
+    });
+
+    expect(result.updated).toBe(true);
+    expect(entry.providerOverride).toBeUndefined();
+    expect(entry.modelOverride).toBeUndefined();
+    expect(entry.modelOverrideSource).toBeUndefined();
+    expect(entry.modelProvider).toBeUndefined();
+    expect(entry.model).toBeUndefined();
     expect(entry.contextTokens).toBeUndefined();
     expect(entry.contextBudgetStatus).toBeUndefined();
     expect((entry.updatedAt ?? 0) > before).toBe(true);

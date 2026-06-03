@@ -1653,6 +1653,74 @@ describe("resolveSessionModelRef", () => {
     });
   });
 
+  test("preserves runtime-only auto auth model fields in the generic resolver", () => {
+    const cfg = createModelDefaultsConfig({
+      primary: "minimax/MiniMax-M2.7",
+    });
+
+    const resolved = resolveSessionModelRef(cfg, {
+      sessionId: "s-auto-fallback-runtime",
+      updatedAt: Date.now(),
+      modelProvider: "deepseek",
+      model: "deepseek-v4-flash",
+      authProfileOverride: "deepseek:default",
+      authProfileOverrideSource: "auto",
+    });
+
+    expect(resolved).toEqual({ provider: "deepseek", model: "deepseek-v4-flash" });
+  });
+
+  test("preserves legacy runtime-only auto auth model fields in the generic resolver", () => {
+    const cfg = createModelDefaultsConfig({
+      primary: "minimax/MiniMax-M2.7",
+    });
+
+    const resolved = resolveSessionModelRef(cfg, {
+      sessionId: "s-legacy-auto-fallback-runtime",
+      updatedAt: Date.now(),
+      modelProvider: "deepseek",
+      model: "deepseek-v4-flash",
+      authProfileOverride: "deepseek:default",
+      authProfileOverrideCompactionCount: 2,
+    });
+
+    expect(resolved).toEqual({ provider: "deepseek", model: "deepseek-v4-flash" });
+  });
+
+  test("preserves auto auth profile runtime fields when they match the selected model", () => {
+    const cfg = createModelDefaultsConfig({
+      primary: "minimax/MiniMax-M2.7",
+    });
+
+    const resolved = resolveSessionModelRef(cfg, {
+      sessionId: "s-auto-auth-runtime",
+      updatedAt: Date.now(),
+      modelProvider: "minimax",
+      model: "MiniMax-M2.7",
+      authProfileOverride: "minimax:global",
+      authProfileOverrideSource: "auto",
+    });
+
+    expect(resolved).toEqual({ provider: "minimax", model: "MiniMax-M2.7" });
+  });
+
+  test("preserves runtime-equivalent OpenAI Codex auth aliases", () => {
+    const cfg = createModelDefaultsConfig({
+      primary: "openai/gpt-5.5",
+    });
+
+    const resolved = resolveSessionModelRef(cfg, {
+      sessionId: "s-auto-auth-runtime-alias",
+      updatedAt: Date.now(),
+      modelProvider: "openai-codex",
+      model: "gpt-5.5",
+      authProfileOverride: "openai-codex:default",
+      authProfileOverrideSource: "auto",
+    });
+
+    expect(resolved).toEqual({ provider: "openai-codex", model: "gpt-5.5" });
+  });
+
   test("falls back to override when runtime model is not recorded yet", () => {
     const cfg = createModelDefaultsConfig({
       primary: "anthropic/claude-opus-4-6",
@@ -2084,6 +2152,71 @@ describe("listSessionsFromStore selected model display", () => {
 
     expect(result.sessions[0]?.modelProvider).toBe("openai");
     expect(result.sessions[0]?.model).toBe("gpt-5.5");
+  });
+
+  test("ignores stale auto auth runtime model metadata in row display", () => {
+    const cfg = {
+      agents: {
+        defaults: { model: { primary: "openai/gpt-5.4" } },
+        list: [{ id: "main", model: { primary: "minimax/MiniMax-M2.7" } }],
+      },
+    } as OpenClawConfig;
+
+    const result = listSessionsFromStore({
+      cfg,
+      storePath: "/tmp/sessions.json",
+      store: {
+        "agent:main:main": {
+          sessionId: "sess-main",
+          updatedAt: Date.now(),
+          modelProvider: "deepseek",
+          model: "deepseek-v4-flash",
+          authProfileOverride: "deepseek:default",
+          authProfileOverrideSource: "auto",
+        } as SessionEntry,
+      },
+      opts: {},
+    });
+
+    expect(result.sessions[0]?.modelProvider).toBe("minimax");
+    expect(result.sessions[0]?.model).toBe("MiniMax-M2.7");
+  });
+
+  test("respects channel-selected model when checking stale auto auth runtime metadata", () => {
+    const cfg = {
+      agents: {
+        defaults: { model: { primary: "openai/gpt-5.4" } },
+        list: [{ id: "main", model: { primary: "minimax/MiniMax-M2.7" } }],
+      },
+      channels: {
+        modelByChannel: {
+          telegram: {
+            "*": "anthropic/claude-opus-4-6",
+          },
+        },
+      },
+    } as OpenClawConfig;
+
+    const result = listSessionsFromStore({
+      cfg,
+      storePath: "/tmp/sessions.json",
+      store: {
+        "agent:main:main": {
+          sessionId: "sess-main",
+          updatedAt: Date.now(),
+          channel: "telegram",
+          chatType: "direct",
+          modelProvider: "anthropic",
+          model: "claude-opus-4-6",
+          authProfileOverride: "anthropic:default",
+          authProfileOverrideSource: "auto",
+        } as SessionEntry,
+      },
+      opts: {},
+    });
+
+    expect(result.sessions[0]?.modelProvider).toBe("anthropic");
+    expect(result.sessions[0]?.model).toBe("claude-opus-4-6");
   });
 
   test("uses complete model overrides without default-model fallback", () => {

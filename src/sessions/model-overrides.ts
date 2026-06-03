@@ -1,11 +1,109 @@
 import { normalizeOptionalString } from "@openclaw/normalization-core/string-coerce";
+import { areRuntimeModelRefsEquivalent } from "../agents/model-runtime-aliases.js";
 import type { SessionEntry } from "../config/sessions.js";
+import type { OpenClawConfig } from "../config/types.openclaw.js";
 
 export type ModelOverrideSelection = {
   provider: string;
   model: string;
   isDefault?: boolean;
 };
+
+export type StaleAutoRuntimeAuthProfileEntry = Pick<
+  SessionEntry,
+  | "authProfileOverride"
+  | "authProfileOverrideCompactionCount"
+  | "authProfileOverrideSource"
+  | "providerOverride"
+  | "modelOverride"
+  | "modelProvider"
+  | "model"
+>;
+
+type ExpectedModelSelection = {
+  provider: string;
+  model: string;
+  config?: OpenClawConfig;
+};
+
+const STALE_AUTO_RUNTIME_AUTH_PROFILE_FIELDS = [
+  "modelProvider",
+  "model",
+  "contextTokens",
+  "contextBudgetStatus",
+  "authProfileOverride",
+  "authProfileOverrideSource",
+  "authProfileOverrideCompactionCount",
+  "fallbackNoticeSelectedModel",
+  "fallbackNoticeActiveModel",
+  "fallbackNoticeReason",
+] as const satisfies readonly (keyof SessionEntry)[];
+
+export function hasStaleAutoRuntimeAuthProfileSelection(
+  entry: StaleAutoRuntimeAuthProfileEntry | undefined,
+  expectedSelection: ExpectedModelSelection,
+): boolean {
+  const hasAutoAuthProfileSelection =
+    entry?.authProfileOverrideSource === "auto" ||
+    // Older rows used the compaction counter as the only durable marker that
+    // an auth-profile override came from automatic fallback/rotation.
+    (entry?.authProfileOverrideSource === undefined &&
+      typeof entry?.authProfileOverrideCompactionCount === "number");
+  if (
+    !hasAutoAuthProfileSelection ||
+    normalizeOptionalString(entry.authProfileOverride) === undefined ||
+    normalizeOptionalString(entry.providerOverride) !== undefined ||
+    normalizeOptionalString(entry.modelOverride) !== undefined
+  ) {
+    return false;
+  }
+
+  const runtimeProvider = normalizeOptionalString(entry?.modelProvider);
+  const runtimeModel = normalizeOptionalString(entry?.model);
+  const expectedProvider = normalizeOptionalString(expectedSelection.provider);
+  const expectedModel = normalizeOptionalString(expectedSelection.model);
+  if (
+    runtimeProvider === undefined ||
+    runtimeModel === undefined ||
+    expectedProvider === undefined ||
+    expectedModel === undefined
+  ) {
+    return false;
+  }
+
+  return !areRuntimeModelRefsEquivalent(
+    `${runtimeProvider}/${runtimeModel}`,
+    `${expectedProvider}/${expectedModel}`,
+    { config: expectedSelection.config },
+  );
+}
+
+export function clearStaleAutoRuntimeAuthProfileSelection(
+  entry: SessionEntry,
+  expectedSelection: ExpectedModelSelection,
+): { updated: boolean } {
+  if (!hasStaleAutoRuntimeAuthProfileSelection(entry, expectedSelection)) {
+    return { updated: false };
+  }
+
+  let updated = false;
+  const clear = (key: keyof SessionEntry) => {
+    if (entry[key] !== undefined) {
+      delete entry[key];
+      updated = true;
+    }
+  };
+
+  for (const key of STALE_AUTO_RUNTIME_AUTH_PROFILE_FIELDS) {
+    clear(key);
+  }
+
+  if (updated) {
+    entry.updatedAt = Date.now();
+  }
+
+  return { updated };
+}
 
 function clearFallbackOrigin(entry: SessionEntry): boolean {
   let updated = false;

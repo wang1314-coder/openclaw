@@ -30,7 +30,11 @@ import {
 } from "../../agents/openai-routing.js";
 import type { SessionEntry } from "../../config/sessions/types.js";
 import type { OpenClawConfig } from "../../config/types.openclaw.js";
-import { applyModelOverrideToSessionEntry } from "../../sessions/model-overrides.js";
+import {
+  applyModelOverrideToSessionEntry,
+  clearStaleAutoRuntimeAuthProfileSelection,
+  hasStaleAutoRuntimeAuthProfileSelection,
+} from "../../sessions/model-overrides.js";
 import { createLazyImportLoader } from "../../shared/lazy-promise.js";
 import type { ThinkLevel } from "./directives.js";
 export {
@@ -235,6 +239,32 @@ export async function createModelSelectionState(params: {
     staleHeartbeatAutoFallbackOverride ||
     staleLegacyOpenAICodexAutoOverride ||
     staleLegacyAutoFallbackWithoutOrigin;
+  const storedOverride = resolveStoredModelOverride({
+    sessionEntry,
+    sessionStore,
+    sessionKey,
+    parentSessionKey,
+    defaultProvider,
+  });
+  const preliminaryAutoRuntimeAuthProfileExpectedSelection =
+    params.skipStoredModelOverride !== true &&
+    params.hasResolvedHeartbeatModelOverride !== true &&
+    storedOverride?.model
+      ? {
+          provider: storedOverride.provider || defaultProvider,
+          model: storedOverride.model,
+        }
+      : {
+          provider: primaryProvider,
+          model: primaryModel,
+        };
+  const preliminaryStaleAutoRuntimeAuthProfileSelection =
+    params.skipStoredModelOverride !== true &&
+    hasStaleAutoRuntimeAuthProfileSelection(sessionEntry, {
+      provider: preliminaryAutoRuntimeAuthProfileExpectedSelection.provider,
+      model: preliminaryAutoRuntimeAuthProfileExpectedSelection.model,
+      config: cfg,
+    });
 
   if (needsModelCatalog) {
     modelCatalog = await (await loadModelCatalogRuntime()).loadModelCatalog({ config: cfg });
@@ -313,14 +343,10 @@ export async function createModelSelectionState(params: {
       model = primaryModel;
     }
   }
-
-  const storedOverride = resolveStoredModelOverride({
-    sessionEntry,
-    sessionStore,
-    sessionKey,
-    parentSessionKey,
-    defaultProvider,
-  });
+  if (preliminaryStaleAutoRuntimeAuthProfileSelection && !params.hasModelDirective) {
+    provider = preliminaryAutoRuntimeAuthProfileExpectedSelection.provider;
+    model = preliminaryAutoRuntimeAuthProfileExpectedSelection.model;
+  }
   // Skip stored session model override only when an explicit heartbeat.model
   // was resolved. Heartbeats without heartbeat.model still inherit normal
   // overrides unless a direct auto fallback override is stale for the current
@@ -354,6 +380,38 @@ export async function createModelSelectionState(params: {
     }
     provider = allowedInitialSelection.provider;
     model = allowedInitialSelection.model;
+  }
+
+  const staleAutoRuntimeAuthProfileSelection =
+    params.skipStoredModelOverride !== true &&
+    hasStaleAutoRuntimeAuthProfileSelection(sessionEntry, {
+      provider,
+      model,
+      config: cfg,
+    });
+
+  if (staleAutoRuntimeAuthProfileSelection && sessionEntry && sessionStore && sessionKey) {
+    const runtimeProvider = sessionEntry.modelProvider;
+    const runtimeModel = sessionEntry.model;
+    const { updated } = clearStaleAutoRuntimeAuthProfileSelection(sessionEntry, {
+      provider,
+      model,
+      config: cfg,
+    });
+    if (updated) {
+      sessionStore[sessionKey] = sessionEntry;
+      if (storePath) {
+        await (
+          await loadSessionStoreRuntime()
+        ).updateSessionStore(storePath, (store) => {
+          store[sessionKey] = sessionEntry;
+        });
+      }
+      resetModelOverride = true;
+      if (!resetModelOverrideRef && runtimeProvider && runtimeModel) {
+        resetModelOverrideRef = modelKey(runtimeProvider, runtimeModel);
+      }
+    }
   }
 
   if (

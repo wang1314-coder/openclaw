@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { testing as cliBackendsTesting } from "../../agents/cli-backends.js";
 import { MODEL_CONTEXT_TOKEN_CACHE } from "../../agents/context-cache.js";
 import {
   loadManifestModelCatalog,
@@ -60,6 +61,7 @@ afterEach(() => {
   vi.mocked(loadManifestModelCatalog).mockReset();
   vi.mocked(loadManifestModelCatalog).mockReturnValue([]);
   authProfileStoreMock.reset();
+  cliBackendsTesting.resetDepsForTest();
 });
 
 const makeConfiguredModel = (overrides: Record<string, unknown> = {}) => ({
@@ -1170,6 +1172,392 @@ describe("createModelSelectionState auto-failover overrides", () => {
     expect(sessionStore[sessionKey]?.providerOverride).toBe("openrouter");
     expect(sessionStore[sessionKey]?.modelOverride).toBe("minimax/minimax-m2.7");
     expect(sessionStore[sessionKey]?.modelOverrideSource).toBe("auto");
+  });
+
+  it("repairs runtime-only auto auth fallback state back to the configured primary", async () => {
+    authProfileStoreMock.store = {
+      version: 1,
+      profiles: {
+        "deepseek:default": {
+          type: "api_key",
+          provider: "deepseek",
+          key: "fallback-key",
+        },
+        "minimax:global": {
+          type: "api_key",
+          provider: "minimax",
+          key: "primary-key",
+        },
+      },
+    };
+    const sessionEntry = makeEntry({
+      modelProvider: "deepseek",
+      model: "deepseek-v4-flash",
+      contextTokens: 64_000,
+      authProfileOverride: "deepseek:default",
+      authProfileOverrideSource: "auto",
+    });
+    const sessionStore = { [sessionKey]: sessionEntry };
+
+    const state = await createModelSelectionState({
+      cfg: {} as OpenClawConfig,
+      agentCfg: undefined,
+      sessionEntry,
+      sessionStore,
+      sessionKey,
+      defaultProvider: "minimax",
+      defaultModel: "MiniMax-M2.7",
+      primaryProvider: "minimax",
+      primaryModel: "MiniMax-M2.7",
+      provider: "deepseek",
+      model: "deepseek-v4-flash",
+      hasModelDirective: false,
+    });
+
+    expect(state.provider).toBe("minimax");
+    expect(state.model).toBe("MiniMax-M2.7");
+    expect(state.resetModelOverride).toBe(true);
+    expect(state.resetModelOverrideRef).toBe("deepseek/deepseek-v4-flash");
+    expect(sessionStore[sessionKey]?.modelProvider).toBeUndefined();
+    expect(sessionStore[sessionKey]?.model).toBeUndefined();
+    expect(sessionStore[sessionKey]?.contextTokens).toBeUndefined();
+    expect(sessionStore[sessionKey]?.authProfileOverride).toBeUndefined();
+    expect(sessionStore[sessionKey]?.authProfileOverrideSource).toBeUndefined();
+  });
+
+  it("repairs legacy runtime-only auto auth fallback state", async () => {
+    authProfileStoreMock.store = {
+      version: 1,
+      profiles: {
+        "deepseek:default": {
+          type: "api_key",
+          provider: "deepseek",
+          key: "fallback-key",
+        },
+        "minimax:global": {
+          type: "api_key",
+          provider: "minimax",
+          key: "primary-key",
+        },
+      },
+    };
+    const sessionEntry = makeEntry({
+      modelProvider: "deepseek",
+      model: "deepseek-v4-flash",
+      contextTokens: 64_000,
+      authProfileOverride: "deepseek:default",
+      authProfileOverrideCompactionCount: 2,
+    });
+    const sessionStore = { [sessionKey]: sessionEntry };
+
+    const state = await createModelSelectionState({
+      cfg: {} as OpenClawConfig,
+      agentCfg: undefined,
+      sessionEntry,
+      sessionStore,
+      sessionKey,
+      defaultProvider: "minimax",
+      defaultModel: "MiniMax-M2.7",
+      primaryProvider: "minimax",
+      primaryModel: "MiniMax-M2.7",
+      provider: "deepseek",
+      model: "deepseek-v4-flash",
+      hasModelDirective: false,
+    });
+
+    expect(state.provider).toBe("minimax");
+    expect(state.model).toBe("MiniMax-M2.7");
+    expect(state.resetModelOverride).toBe(true);
+    expect(state.resetModelOverrideRef).toBe("deepseek/deepseek-v4-flash");
+    expect(sessionStore[sessionKey]?.modelProvider).toBeUndefined();
+    expect(sessionStore[sessionKey]?.model).toBeUndefined();
+    expect(sessionStore[sessionKey]?.contextTokens).toBeUndefined();
+    expect(sessionStore[sessionKey]?.authProfileOverride).toBeUndefined();
+    expect(sessionStore[sessionKey]?.authProfileOverrideCompactionCount).toBeUndefined();
+  });
+
+  it("does not override an explicit model directive while repairing stale auto auth state", async () => {
+    authProfileStoreMock.store = {
+      version: 1,
+      profiles: {
+        "deepseek:default": {
+          type: "api_key",
+          provider: "deepseek",
+          key: "fallback-key",
+        },
+      },
+    };
+    const sessionEntry = makeEntry({
+      modelProvider: "deepseek",
+      model: "deepseek-v4-flash",
+      contextTokens: 64_000,
+      authProfileOverride: "deepseek:default",
+      authProfileOverrideSource: "auto",
+    });
+    const sessionStore = { [sessionKey]: sessionEntry };
+
+    const state = await createModelSelectionState({
+      cfg: {} as OpenClawConfig,
+      agentCfg: undefined,
+      sessionEntry,
+      sessionStore,
+      sessionKey,
+      defaultProvider: "minimax",
+      defaultModel: "MiniMax-M2.7",
+      primaryProvider: "minimax",
+      primaryModel: "MiniMax-M2.7",
+      provider: "anthropic",
+      model: "claude-opus-4-6",
+      hasModelDirective: true,
+    });
+
+    expect(state.provider).toBe("anthropic");
+    expect(state.model).toBe("claude-opus-4-6");
+    expect(state.resetModelOverride).toBe(true);
+    expect(state.resetModelOverrideRef).toBe("deepseek/deepseek-v4-flash");
+    expect(sessionStore[sessionKey]?.modelProvider).toBeUndefined();
+    expect(sessionStore[sessionKey]?.model).toBeUndefined();
+    expect(sessionStore[sessionKey]?.authProfileOverride).toBeUndefined();
+  });
+
+  it("preserves ordinary auto auth profile rotation when runtime model matches selection", async () => {
+    authProfileStoreMock.store = {
+      version: 1,
+      profiles: {
+        "minimax:global": {
+          type: "api_key",
+          provider: "minimax",
+          key: "primary-key",
+        },
+      },
+    };
+    const sessionEntry = makeEntry({
+      modelProvider: "minimax",
+      model: "MiniMax-M2.7",
+      contextTokens: 128_000,
+      authProfileOverride: "minimax:global",
+      authProfileOverrideSource: "auto",
+      authProfileOverrideCompactionCount: 0,
+    });
+    const sessionStore = { [sessionKey]: sessionEntry };
+
+    const state = await createModelSelectionState({
+      cfg: {} as OpenClawConfig,
+      agentCfg: undefined,
+      sessionEntry,
+      sessionStore,
+      sessionKey,
+      defaultProvider: "minimax",
+      defaultModel: "MiniMax-M2.7",
+      primaryProvider: "minimax",
+      primaryModel: "MiniMax-M2.7",
+      provider: "minimax",
+      model: "MiniMax-M2.7",
+      hasModelDirective: false,
+    });
+
+    expect(state.provider).toBe("minimax");
+    expect(state.model).toBe("MiniMax-M2.7");
+    expect(state.resetModelOverride).toBe(false);
+    expect(sessionStore[sessionKey]?.modelProvider).toBe("minimax");
+    expect(sessionStore[sessionKey]?.model).toBe("MiniMax-M2.7");
+    expect(sessionStore[sessionKey]?.contextTokens).toBe(128_000);
+    expect(sessionStore[sessionKey]?.authProfileOverride).toBe("minimax:global");
+    expect(sessionStore[sessionKey]?.authProfileOverrideSource).toBe("auto");
+  });
+
+  it("preserves auto auth state when it matches an inherited parent model override", async () => {
+    authProfileStoreMock.store = {
+      version: 1,
+      profiles: {
+        "anthropic:work": {
+          type: "api_key",
+          provider: "anthropic",
+          key: "primary-key",
+        },
+      },
+    };
+    const parentSessionKey = "agent:main:telegram:direct:parent";
+    const sessionEntry = makeEntry({
+      parentSessionKey,
+      modelProvider: "anthropic",
+      model: "claude-opus-4-6",
+      contextTokens: 200_000,
+      authProfileOverride: "anthropic:work",
+      authProfileOverrideSource: "auto",
+      authProfileOverrideCompactionCount: 1,
+    });
+    const sessionStore = {
+      [sessionKey]: sessionEntry,
+      [parentSessionKey]: makeEntry({
+        providerOverride: "anthropic",
+        modelOverride: "claude-opus-4-6",
+        modelOverrideSource: "user",
+      }),
+    };
+
+    const state = await createModelSelectionState({
+      cfg: {} as OpenClawConfig,
+      agentCfg: undefined,
+      sessionEntry,
+      sessionStore,
+      sessionKey,
+      parentSessionKey,
+      defaultProvider: "minimax",
+      defaultModel: "MiniMax-M2.7",
+      primaryProvider: "minimax",
+      primaryModel: "MiniMax-M2.7",
+      provider: "minimax",
+      model: "MiniMax-M2.7",
+      hasModelDirective: false,
+    });
+
+    expect(state.provider).toBe("anthropic");
+    expect(state.model).toBe("claude-opus-4-6");
+    expect(state.resetModelOverride).toBe(false);
+    expect(sessionStore[sessionKey]?.modelProvider).toBe("anthropic");
+    expect(sessionStore[sessionKey]?.model).toBe("claude-opus-4-6");
+    expect(sessionStore[sessionKey]?.contextTokens).toBe(200_000);
+    expect(sessionStore[sessionKey]?.authProfileOverride).toBe("anthropic:work");
+    expect(sessionStore[sessionKey]?.authProfileOverrideSource).toBe("auto");
+  });
+
+  it("repairs auto auth state when an inherited parent override is no longer allowed", async () => {
+    authProfileStoreMock.store = {
+      version: 1,
+      profiles: {
+        "anthropic:work": {
+          type: "api_key",
+          provider: "anthropic",
+          key: "old-key",
+        },
+        "minimax:global": {
+          type: "api_key",
+          provider: "minimax",
+          key: "primary-key",
+        },
+      },
+    };
+    const parentSessionKey = "agent:main:telegram:direct:parent";
+    const sessionEntry = makeEntry({
+      parentSessionKey,
+      modelProvider: "anthropic",
+      model: "claude-opus-4-6",
+      contextTokens: 200_000,
+      authProfileOverride: "anthropic:work",
+      authProfileOverrideSource: "auto",
+    });
+    const sessionStore = {
+      [sessionKey]: sessionEntry,
+      [parentSessionKey]: makeEntry({
+        providerOverride: "anthropic",
+        modelOverride: "claude-opus-4-6",
+        modelOverrideSource: "user",
+      }),
+    };
+    const cfg = {
+      agents: {
+        defaults: {
+          models: {
+            "minimax/MiniMax-M2.7": {},
+          },
+        },
+      },
+    } as OpenClawConfig;
+    const agentCfg = cfg.agents?.defaults;
+
+    const state = await createModelSelectionState({
+      cfg,
+      agentCfg,
+      sessionEntry,
+      sessionStore,
+      sessionKey,
+      parentSessionKey,
+      defaultProvider: "minimax",
+      defaultModel: "MiniMax-M2.7",
+      primaryProvider: "minimax",
+      primaryModel: "MiniMax-M2.7",
+      provider: "minimax",
+      model: "MiniMax-M2.7",
+      hasModelDirective: false,
+    });
+
+    expect(state.provider).toBe("minimax");
+    expect(state.model).toBe("MiniMax-M2.7");
+    expect(state.resetModelOverride).toBe(true);
+    expect(state.resetModelOverrideRef).toBe("anthropic/claude-opus-4-6");
+    expect(sessionStore[sessionKey]?.modelProvider).toBeUndefined();
+    expect(sessionStore[sessionKey]?.model).toBeUndefined();
+    expect(sessionStore[sessionKey]?.contextTokens).toBeUndefined();
+    expect(sessionStore[sessionKey]?.authProfileOverride).toBeUndefined();
+  });
+
+  it("preserves runtime-equivalent CLI auto auth selections", async () => {
+    cliBackendsTesting.setDepsForTest({
+      resolvePluginSetupCliBackend: ({ backend }) =>
+        backend === "claude-cli"
+          ? {
+              pluginId: "anthropic",
+              backend: {
+                id: "claude-cli",
+                modelProvider: "anthropic",
+                config: { command: "claude" },
+                bundleMcp: false,
+              },
+            }
+          : undefined,
+    });
+    authProfileStoreMock.store = {
+      version: 1,
+      profiles: {
+        "anthropic:claude-cli": {
+          type: "api_key",
+          provider: "anthropic",
+          key: "anthropic-key",
+        },
+      },
+    };
+    const sessionEntry = makeEntry({
+      modelProvider: "claude-cli",
+      model: "claude-opus-4-7",
+      contextTokens: 200_000,
+      authProfileOverride: "anthropic:claude-cli",
+      authProfileOverrideSource: "auto",
+      authProfileOverrideCompactionCount: 0,
+    });
+    const sessionStore = { [sessionKey]: sessionEntry };
+
+    const state = await createModelSelectionState({
+      cfg: {
+        agents: {
+          defaults: {
+            cliBackends: {
+              "claude-cli": { command: "claude" },
+            },
+          },
+        },
+      } as OpenClawConfig,
+      agentCfg: undefined,
+      sessionEntry,
+      sessionStore,
+      sessionKey,
+      defaultProvider: "anthropic",
+      defaultModel: "claude-opus-4-7",
+      primaryProvider: "anthropic",
+      primaryModel: "claude-opus-4-7",
+      provider: "anthropic",
+      model: "claude-opus-4-7",
+      hasModelDirective: false,
+    });
+
+    expect(state.provider).toBe("anthropic");
+    expect(state.model).toBe("claude-opus-4-7");
+    expect(state.resetModelOverride).toBe(false);
+    expect(sessionStore[sessionKey]?.modelProvider).toBe("claude-cli");
+    expect(sessionStore[sessionKey]?.model).toBe("claude-opus-4-7");
+    expect(sessionStore[sessionKey]?.contextTokens).toBe(200_000);
+    expect(sessionStore[sessionKey]?.authProfileOverride).toBe("anthropic:claude-cli");
+    expect(sessionStore[sessionKey]?.authProfileOverrideSource).toBe("auto");
   });
 
   it("clears stale auto-created legacy openai route pins when primary is canonical openai", async () => {

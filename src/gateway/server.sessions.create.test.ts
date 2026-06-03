@@ -157,6 +157,260 @@ test("sessions.create inherits parent runtime model selection when model is omit
   expect(rawStore[key]?.parentSessionKey).toBe("agent:main:main");
 });
 
+test("sessions.create does not inherit runtime-only auto auth fallback selection", async () => {
+  await createSessionStoreDir();
+  await writeSessionStore({
+    entries: {
+      main: sessionStoreEntry("sess-parent", {
+        modelProvider: "deepseek",
+        model: "deepseek-v4-flash",
+        contextTokens: 64000,
+        authProfileOverride: "deepseek:default",
+        authProfileOverrideSource: "auto",
+      }),
+    },
+  });
+
+  const created = await directSessionReq<{
+    entry?: {
+      modelProvider?: string;
+      model?: string;
+      contextTokens?: number;
+      authProfileOverride?: string;
+      authProfileOverrideSource?: string;
+      parentSessionKey?: string;
+    };
+  }>("sessions.create", {
+    agentId: "main",
+    label: "Fresh Chat",
+    parentSessionKey: "main",
+  });
+
+  expect(created.ok).toBe(true);
+  expect(created.payload?.entry?.parentSessionKey).toBe("agent:main:main");
+  expect(created.payload?.entry?.modelProvider).toBeUndefined();
+  expect(created.payload?.entry?.model).toBeUndefined();
+  expect(created.payload?.entry?.contextTokens).toBeUndefined();
+  expect(created.payload?.entry?.authProfileOverride).toBeUndefined();
+  expect(created.payload?.entry?.authProfileOverrideSource).toBeUndefined();
+});
+
+test("sessions.create does not inherit legacy runtime-only auto auth fallback selection", async () => {
+  await createSessionStoreDir();
+  await writeSessionStore({
+    entries: {
+      main: sessionStoreEntry("sess-parent", {
+        modelProvider: "deepseek",
+        model: "deepseek-v4-flash",
+        contextTokens: 64000,
+        authProfileOverride: "deepseek:default",
+        authProfileOverrideCompactionCount: 2,
+      }),
+    },
+  });
+
+  const created = await directSessionReq<{
+    entry?: {
+      modelProvider?: string;
+      model?: string;
+      contextTokens?: number;
+      authProfileOverride?: string;
+      authProfileOverrideSource?: string;
+      parentSessionKey?: string;
+    };
+  }>("sessions.create", {
+    agentId: "main",
+    label: "Fresh Chat",
+    parentSessionKey: "main",
+  });
+
+  expect(created.ok).toBe(true);
+  expect(created.payload?.entry?.parentSessionKey).toBe("agent:main:main");
+  expect(created.payload?.entry?.modelProvider).toBeUndefined();
+  expect(created.payload?.entry?.model).toBeUndefined();
+  expect(created.payload?.entry?.contextTokens).toBeUndefined();
+  expect(created.payload?.entry?.authProfileOverride).toBeUndefined();
+  expect(created.payload?.entry?.authProfileOverrideSource).toBeUndefined();
+});
+
+test("sessions.create inherits healthy auto auth runtime selection", async () => {
+  await createSessionStoreDir();
+  await writeSessionStore({
+    entries: {
+      main: sessionStoreEntry("sess-parent", {
+        modelProvider: "anthropic",
+        model: "claude-opus-4-6",
+        contextTokens: 200000,
+        authProfileOverride: "anthropic:work",
+        authProfileOverrideSource: "auto",
+      }),
+    },
+  });
+
+  const created = await directSessionReq<{
+    entry?: {
+      modelProvider?: string;
+      model?: string;
+      contextTokens?: number;
+      authProfileOverride?: string;
+      authProfileOverrideSource?: string;
+      parentSessionKey?: string;
+    };
+  }>("sessions.create", {
+    agentId: "main",
+    label: "Fresh Chat",
+    parentSessionKey: "main",
+  });
+
+  expect(created.ok).toBe(true);
+  expect(created.payload?.entry?.parentSessionKey).toBe("agent:main:main");
+  expect(created.payload?.entry?.modelProvider).toBe("anthropic");
+  expect(created.payload?.entry?.model).toBe("claude-opus-4-6");
+  expect(created.payload?.entry?.contextTokens).toBe(200000);
+  expect(created.payload?.entry?.authProfileOverride).toBe("anthropic:work");
+  expect(created.payload?.entry?.authProfileOverrideSource).toBe("auto");
+});
+
+test("sessions.create inherits auto auth runtime selection for a channel primary", async () => {
+  await createSessionStoreDir();
+  testState.agentConfig = { model: { primary: "minimax/MiniMax-M2.7" } };
+  testState.channelsConfig = {
+    modelByChannel: {
+      telegram: {
+        "*": "anthropic/claude-opus-4-6",
+      },
+    },
+  };
+  await writeSessionStore({
+    entries: {
+      main: sessionStoreEntry("sess-parent", {
+        channel: "telegram",
+        chatType: "direct",
+        modelProvider: "anthropic",
+        model: "claude-opus-4-6",
+        contextTokens: 200000,
+        authProfileOverride: "anthropic:work",
+        authProfileOverrideSource: "auto",
+      }),
+    },
+  });
+
+  const created = await directSessionReq<{
+    entry?: {
+      modelProvider?: string;
+      model?: string;
+      contextTokens?: number;
+      authProfileOverride?: string;
+      authProfileOverrideSource?: string;
+      parentSessionKey?: string;
+    };
+  }>("sessions.create", {
+    agentId: "main",
+    label: "Fresh Chat",
+    parentSessionKey: "main",
+  });
+
+  expect(created.ok).toBe(true);
+  expect(created.payload?.entry?.parentSessionKey).toBe("agent:main:main");
+  expect(created.payload?.entry?.modelProvider).toBe("anthropic");
+  expect(created.payload?.entry?.model).toBe("claude-opus-4-6");
+  expect(created.payload?.entry?.contextTokens).toBe(200000);
+  expect(created.payload?.entry?.authProfileOverride).toBe("anthropic:work");
+  expect(created.payload?.entry?.authProfileOverrideSource).toBe("auto");
+});
+
+test("sessions.create follows inherited channel selection for nested parents", async () => {
+  await createSessionStoreDir();
+  testState.agentConfig = { model: { primary: "minimax/MiniMax-M2.7" } };
+  testState.channelsConfig = {
+    modelByChannel: {
+      telegram: {
+        "*": "anthropic/claude-opus-4-6",
+      },
+    },
+  };
+  await writeSessionStore({
+    entries: {
+      "agent:main:telegram:direct:root": sessionStoreEntry("sess-root", {
+        channel: "telegram",
+        chatType: "direct",
+      }),
+      "agent:main:dashboard:parent": sessionStoreEntry("sess-parent", {
+        parentSessionKey: "agent:main:telegram:direct:root",
+        modelProvider: "anthropic",
+        model: "claude-opus-4-6",
+        contextTokens: 200000,
+        authProfileOverride: "anthropic:work",
+        authProfileOverrideSource: "auto",
+      }),
+    },
+  });
+
+  const created = await directSessionReq<{
+    entry?: {
+      modelProvider?: string;
+      model?: string;
+      contextTokens?: number;
+      authProfileOverride?: string;
+      authProfileOverrideSource?: string;
+      parentSessionKey?: string;
+    };
+  }>("sessions.create", {
+    agentId: "main",
+    label: "Fresh Chat",
+    parentSessionKey: "agent:main:dashboard:parent",
+  });
+
+  expect(created.ok).toBe(true);
+  expect(created.payload?.entry?.parentSessionKey).toBe("agent:main:dashboard:parent");
+  expect(created.payload?.entry?.modelProvider).toBe("anthropic");
+  expect(created.payload?.entry?.model).toBe("claude-opus-4-6");
+  expect(created.payload?.entry?.contextTokens).toBe(200000);
+  expect(created.payload?.entry?.authProfileOverride).toBe("anthropic:work");
+  expect(created.payload?.entry?.authProfileOverrideSource).toBe("auto");
+});
+
+test("sessions.create inherits matching CLI runtime auth selection", async () => {
+  await createSessionStoreDir();
+  testState.agentConfig = {
+    model: { primary: "claude-cli/claude-opus-4-7" },
+  };
+  await writeSessionStore({
+    entries: {
+      main: sessionStoreEntry("sess-parent", {
+        modelProvider: "claude-cli",
+        model: "claude-opus-4-7",
+        contextTokens: 200000,
+        authProfileOverride: "claude-cli:default",
+        authProfileOverrideSource: "auto",
+      }),
+    },
+  });
+
+  const created = await directSessionReq<{
+    entry?: {
+      modelProvider?: string;
+      model?: string;
+      contextTokens?: number;
+      authProfileOverride?: string;
+      authProfileOverrideSource?: string;
+      parentSessionKey?: string;
+    };
+  }>("sessions.create", {
+    agentId: "main",
+    label: "Fresh Chat",
+    parentSessionKey: "main",
+  });
+
+  expect(created.ok).toBe(true);
+  expect(created.payload?.entry?.parentSessionKey).toBe("agent:main:main");
+  expect(created.payload?.entry?.modelProvider).toBe("claude-cli");
+  expect(created.payload?.entry?.model).toBe("claude-opus-4-7");
+  expect(created.payload?.entry?.contextTokens).toBe(200000);
+  expect(created.payload?.entry?.authProfileOverride).toBe("claude-cli:default");
+  expect(created.payload?.entry?.authProfileOverrideSource).toBe("auto");
+});
+
 test("sessions.create accepts an explicit key for persistent dashboard sessions", async () => {
   await createSessionStoreDir();
 
