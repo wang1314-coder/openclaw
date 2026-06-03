@@ -2376,6 +2376,7 @@ export async function runCodexAppServerAttempt(
         sessionFile: activeSessionFile,
         messagesSnapshot: finalMessages,
         prePromptMessageCount,
+        ...(params.trigger === "heartbeat" ? { isHeartbeat: true } : {}),
         tokenBudget: params.contextTokenBudget,
         runtimeContext: buildHarnessContextEngineRuntimeContextFromUsage({
           attempt: buildActiveRunAttemptParams(),

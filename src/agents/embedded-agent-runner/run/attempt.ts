@@ -316,6 +316,7 @@ import {
   remapInjectedContextFilesToWorkspace,
 } from "./attempt.bootstrap-context.js";
 export { buildContextEnginePromptCacheInfo } from "./attempt.context-engine-helpers.js";
+import { getAgentRunContext } from "../../../infra/agent-events.js";
 import {
   rotateTranscriptAfterCompaction,
   shouldRotateCompactionTranscript,
@@ -2356,6 +2357,7 @@ export async function runEmbeddedAttempt(
           sessionFile: params.sessionFile,
           tokenBudget: params.contextTokenBudget,
           modelId: params.modelId,
+          ...(params.trigger === "heartbeat" ? { isHeartbeat: true } : {}),
           getPrePromptMessageCount: () => prePromptMessageCount,
           onAfterTurnCheckpoint: (messageCount) => {
             contextEngineAfterTurnCheckpoint = messageCount;
@@ -4652,6 +4654,7 @@ export async function runEmbeddedAttempt(
             prePromptMessageCount: contextEngineAfterTurnCheckpoint ?? prePromptMessageCount,
             tokenBudget: params.contextTokenBudget,
             runtimeContext: afterTurnRuntimeContext,
+            ...(params.trigger === "heartbeat" ? { isHeartbeat: true } : {}),
             runMaintenance: async (contextParams) =>
               await runContextEngineMaintenance({
                 contextEngine: contextParams.contextEngine as never,
