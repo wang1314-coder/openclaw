@@ -30,6 +30,21 @@ surfaces. OpenClaw code mode is an OpenClaw-owned experimental tool-surface
 adapter for generic OpenClaw runs. It uses `quickjs-wasi`, a hidden OpenClaw
 tool catalog, and the normal OpenClaw tool executor.
 
+## OpenClaw code mode vs Codex Code Mode
+
+| Topic                      | OpenClaw code mode                                                                      | Codex Code Mode                                                                             |
+| -------------------------- | --------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------- |
+| Owner                      | OpenClaw generic agent runtime                                                          | Codex app-server runtime                                                                    |
+| Default state              | Off unless `tools.codeMode.enabled: true`                                               | On for Codex app-server threads unless native code mode is restricted or disabled           |
+| Guest runtime              | `quickjs-wasi`                                                                          | Codex native coding harness                                                                 |
+| Model-visible `exec` input | `exec.code` with JavaScript or TypeScript                                               | `exec.command` for shell-style commands                                                     |
+| Visible tool surface       | `exec` and `wait`, plus the hidden OpenClaw tool catalog behind guest helpers           | Codex-native code mode plus Codex-native dynamic tool surfaces                              |
+| Policy path                | Nested calls still run through normal OpenClaw tools, hooks, approvals, auth, and audit | Native Codex thread/tool policy, with OpenClaw bridging selected app-server and hook events |
+| Stability                  | Experimental OpenClaw feature                                                           | Stable Codex harness surface                                                                |
+
+If you are using the bundled Codex harness, see
+[Codex harness](/plugins/codex-harness) for the Codex-native side of the split.
+
 ## What is this?
 
 OpenClaw code mode lets the model write a small JavaScript or TypeScript program
