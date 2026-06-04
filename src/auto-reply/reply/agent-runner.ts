@@ -16,6 +16,7 @@ import {
   queueEmbeddedAgentMessageWithOutcomeAsync,
 } from "../../agents/embedded-agent-runner/runs.js";
 import { resolveFastModeState } from "../../agents/fast-mode.js";
+import { resolveAgentIdentity } from "../../agents/identity.js";
 import { resolveModelAuthMode } from "../../agents/model-auth.js";
 import { isCliProvider } from "../../agents/model-selection.js";
 import { deriveContextPromptTokens, hasNonzeroUsage, normalizeUsage } from "../../agents/usage.js";
@@ -41,8 +42,8 @@ import {
 } from "../../infra/diagnostic-trace-context.js";
 import { measureDiagnosticsTimelineSpan } from "../../infra/diagnostics-timeline.js";
 import { getProviderUsageLimitsCached } from "../../infra/provider-usage.limits.js";
-import { resolveAgentIdentity } from "../../agents/identity.js";
 import { enqueueSystemEvent } from "../../infra/system-events.js";
+import type { PluginHookReplyUsageState } from "../../plugins/hook-types.js";
 import { CommandLaneClearedError, GatewayDrainingError } from "../../process/command-queue.js";
 import { shouldPreserveUserFacingSessionStateForInputProvenance } from "../../sessions/input-provenance.js";
 import { resolveSendPolicy } from "../../sessions/send-policy.js";
@@ -70,6 +71,9 @@ import type { OriginatingChannelType, TemplateContext } from "../templating.js";
 import { resolveResponseUsageMode, type VerboseLevel } from "../thinking.js";
 import { SILENT_REPLY_TOKEN } from "../tokens.js";
 import type { GetReplyOptions, ReplyPayload } from "../types.js";
+import { buildUsageContract } from "../usage-bar/contract.js";
+import { loadUsageBarTemplate } from "../usage-bar/template.js";
+import { renderUsageBar } from "../usage-bar/translator.js";
 import {
   buildKnownAgentRunFailureReplyPayload,
   runAgentTurnWithFallback,
@@ -90,10 +94,6 @@ import {
 import { resetReplyRunSession } from "./agent-runner-session-reset.js";
 import { appendUsageLine, formatResponseUsageLine } from "./agent-runner-usage-line.js";
 import { resolveQueuedReplyExecutionConfig } from "./agent-runner-utils.js";
-import { buildUsageContract } from "../usage-bar/contract.js";
-import { loadUsageBarTemplate } from "../usage-bar/template.js";
-import { renderUsageBar } from "../usage-bar/translator.js";
-import type { PluginHookReplyUsageState } from "../../plugins/hook-types.js";
 import { createAudioAsVoiceBuffer, createBlockReplyPipeline } from "./block-reply-pipeline.js";
 import { resolveEffectiveBlockStreamingConfig } from "./block-streaming.js";
 import {
@@ -1755,63 +1755,62 @@ export async function runReplyAgent(params: {
       const ctxTokens = runResult.meta?.agentMeta?.contextTokens;
       const compactions = runResult.meta?.agentMeta?.compactionCount;
       replyUsageSnapshot = {
-          provider: providerUsed,
-          model: modelUsed,
-          resolvedRef:
-            winnerProvider && winnerModel ? `${winnerProvider}/${winnerModel}` : undefined,
-          reasoningEffort:
-            typeof followupRun.run.thinkLevel === "string" ? followupRun.run.thinkLevel : undefined,
-          fastMode: resolveFastModeState({
-            cfg,
-            provider: providerUsed ?? "",
-            model: modelUsed ?? "",
-            agentId: followupRun.run.agentId,
-            sessionEntry: activeSessionEntry,
-          }).enabled,
-          fallbackUsed: runResult.meta?.executionTrace?.fallbackUsed === true,
-          // Richer per-turn atoms for usage rendering (/usage + plugins).
+        provider: providerUsed,
+        model: modelUsed,
+        resolvedRef: winnerProvider && winnerModel ? `${winnerProvider}/${winnerModel}` : undefined,
+        reasoningEffort:
+          typeof followupRun.run.thinkLevel === "string" ? followupRun.run.thinkLevel : undefined,
+        fastMode: resolveFastModeState({
+          cfg,
+          provider: providerUsed ?? "",
+          model: modelUsed ?? "",
           agentId: followupRun.run.agentId,
-          sessionId: followupRun.run.sessionId,
-          chatType: typeof sessionCtx.ChatType === "string" ? sessionCtx.ChatType : undefined,
-          authMode: runResult.meta?.requestShaping?.authMode ?? undefined,
-          overrideSource: activeSessionEntry?.modelOverrideSource ?? undefined,
-          requested:
-            followupRun.run.provider && followupRun.run.model
-              ? `${followupRun.run.provider}/${followupRun.run.model}`
-              : undefined,
-          turnUsd: usage
-            ? estimateUsageCost({
-                usage,
-                cost: resolveModelCostConfig({
-                  provider: providerUsed,
-                  model: modelUsed,
-                  config: cfg,
-                }),
-              })
+          sessionEntry: activeSessionEntry,
+        }).enabled,
+        fallbackUsed: runResult.meta?.executionTrace?.fallbackUsed === true,
+        // Richer per-turn atoms for usage rendering (/usage + plugins).
+        agentId: followupRun.run.agentId,
+        sessionId: followupRun.run.sessionId,
+        chatType: typeof sessionCtx.ChatType === "string" ? sessionCtx.ChatType : undefined,
+        authMode: runResult.meta?.requestShaping?.authMode ?? undefined,
+        overrideSource: activeSessionEntry?.modelOverrideSource ?? undefined,
+        requested:
+          followupRun.run.provider && followupRun.run.model
+            ? `${followupRun.run.provider}/${followupRun.run.model}`
             : undefined,
-          durationMs: Date.now() - runStartedAt,
-          identity: resolveAgentIdentity(cfg, followupRun.run.agentId),
-          compactionCount: typeof compactions === "number" ? compactions : undefined,
-          contextTokenBudget:
-            typeof ctxTokens === "number" && Number.isFinite(ctxTokens) ? ctxTokens : undefined,
-          usage: usage
-            ? {
-                input: usage.input,
-                output: usage.output,
-                cacheRead: usage.cacheRead,
-                cacheWrite: usage.cacheWrite,
-                total: usage.total,
-              }
-            : undefined,
-          // Provider subscription/limit windows for the 📊 readout. Non-blocking
-          // (stale-while-revalidate): returns cached windows or undefined on a
-          // cold cache and refreshes in the background, so it never delays the
-          // reply. Credential-aware: the turn's authMode is threaded through so an
-          // api-key OpenAI turn resolves to no provider (undefined limits) instead
-          // of borrowing OAuth/ChatGPT windows. Undefined for api-key / unmapped.
-          limits: getProviderUsageLimitsCached(providerUsed, {
-            credentialType: runResult.meta?.requestShaping?.authMode ?? undefined,
-          }),
+        turnUsd: usage
+          ? estimateUsageCost({
+              usage,
+              cost: resolveModelCostConfig({
+                provider: providerUsed,
+                model: modelUsed,
+                config: cfg,
+              }),
+            })
+          : undefined,
+        durationMs: Date.now() - runStartedAt,
+        identity: resolveAgentIdentity(cfg, followupRun.run.agentId),
+        compactionCount: typeof compactions === "number" ? compactions : undefined,
+        contextTokenBudget:
+          typeof ctxTokens === "number" && Number.isFinite(ctxTokens) ? ctxTokens : undefined,
+        usage: usage
+          ? {
+              input: usage.input,
+              output: usage.output,
+              cacheRead: usage.cacheRead,
+              cacheWrite: usage.cacheWrite,
+              total: usage.total,
+            }
+          : undefined,
+        // Provider subscription/limit windows for the 📊 readout. Non-blocking
+        // (stale-while-revalidate): returns cached windows or undefined on a
+        // cold cache and refreshes in the background, so it never delays the
+        // reply. Credential-aware: the turn's authMode is threaded through so an
+        // api-key OpenAI turn resolves to no provider (undefined limits) instead
+        // of borrowing OAuth/ChatGPT windows. Undefined for api-key / unmapped.
+        limits: getProviderUsageLimitsCached(providerUsed, {
+          credentialType: runResult.meta?.requestShaping?.authMode ?? undefined,
+        }),
       };
       recordReplyUsageState({ runId, sessionKey }, replyUsageSnapshot);
     }

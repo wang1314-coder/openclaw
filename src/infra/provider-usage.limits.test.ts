@@ -8,9 +8,8 @@ vi.mock("./provider-usage.load.js", () => ({
   loadProviderUsageSummary: loadMock,
 }));
 
-const { getProviderUsageLimits, clearProviderUsageLimitsCacheForTest } = await import(
-  "./provider-usage.limits.js"
-);
+const { getProviderUsageLimits, clearProviderUsageLimitsCacheForTest } =
+  await import("./provider-usage.limits.js");
 
 afterEach(() => {
   loadMock.mockReset();
