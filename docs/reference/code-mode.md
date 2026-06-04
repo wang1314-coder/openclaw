@@ -37,7 +37,7 @@ tool catalog, and the normal OpenClaw tool executor.
 | Owner                      | OpenClaw generic agent runtime                                                          | Codex app-server runtime                                                                    |
 | Default state              | Off unless `tools.codeMode.enabled: true`                                               | On for Codex app-server threads unless native code mode is restricted or disabled           |
 | Guest runtime              | `quickjs-wasi`                                                                          | Codex native coding harness                                                                 |
-| Model-visible `exec` input | `exec.code` with JavaScript or TypeScript                                               | `exec.command` for shell-style commands                                                     |
+| Model-visible `exec` input | `exec.code` (and `exec.command` as an alias) with JavaScript or TypeScript              | `exec` with raw JavaScript or TypeScript source code                                        |
 | Visible tool surface       | `exec` and `wait`, plus the hidden OpenClaw tool catalog behind guest helpers           | Codex-native code mode plus Codex-native dynamic tool surfaces                              |
 | Policy path                | Nested calls still run through normal OpenClaw tools, hooks, approvals, auth, and audit | Native Codex thread/tool policy, with OpenClaw bridging selected app-server and hook events |
 | Stability                  | Experimental OpenClaw feature                                                           | Stable Codex harness surface                                                                |
