@@ -965,6 +965,7 @@ export const FIELD_LABELS: Record<string, string> = {
   messages: "Messages",
   "messages.messagePrefix": "Inbound Message Prefix",
   "messages.visibleReplies": "Visible Replies",
+  "messages.strandedReplyRecovery": "Stranded Reply Recovery",
   "messages.responsePrefix": "Outbound Response Prefix",
   "messages.groupChat": "Group Chat Rules",
   "messages.groupChat.mentionPatterns": "Group Mention Patterns",
