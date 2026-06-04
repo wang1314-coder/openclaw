@@ -579,15 +579,21 @@ What to do:
      ~/Library/LaunchAgents/ai.openclaw.node.plist.disabled
    ```
 
-4. Restart the existing gateway service without regenerating the wrapper:
+4. Reload the existing gateway LaunchAgent through `launchctl` so the manual
+   wrapper edit stays in place:
 
    ```bash
-   openclaw gateway restart
+   launchctl bootout gui/$UID/ai.openclaw.gateway
+   launchctl bootstrap gui/$UID ~/Library/LaunchAgents/ai.openclaw.gateway.plist
    ```
 
-   Do not run `openclaw gateway install --force` as part of this workaround on
-   current releases unless the generated wrapper has also been fixed upstream.
-   Reinstall regenerates
+   If you run a named profile, replace `ai.openclaw.gateway` with
+   `ai.openclaw.<profile>` in both commands and use the matching plist path
+   `~/Library/LaunchAgents/ai.openclaw.<profile>.plist`.
+
+   Do not run `openclaw gateway restart` or `openclaw gateway install --force`
+   as part of this workaround on current releases unless the generated wrapper
+   has also been fixed upstream. Both commands regenerate
    `~/.openclaw/service-env/ai.openclaw.gateway-env-wrapper.sh` and can erase
    the manual `unset OPENCLAW_LAUNCHD_LABEL ...` repair you just applied.
 
