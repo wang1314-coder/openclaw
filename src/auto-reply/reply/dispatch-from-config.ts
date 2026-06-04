@@ -2234,7 +2234,12 @@ export async function dispatchReplyFromConfig(
     const sendFinalPayload = async (
       payload: ReplyPayload,
       options: { abortSignal?: AbortSignal } = {},
-    ): Promise<{ queuedFinal: boolean; routedFinalCount: number; deliveredMedia: boolean }> => {
+    ): Promise<{
+      queuedFinal: boolean;
+      routedFinalCount: number;
+      deliveredMedia: boolean;
+      deliveredFinal: boolean;
+    }> => {
       const abortSignal = options.abortSignal ?? getDispatchAbortSignal();
       const throwIfFinalDeliveryAborted = () => {
         if (abortSignal?.aborted) {
@@ -2295,6 +2300,9 @@ export async function dispatchReplyFromConfig(
           // Only treat media as delivered when the route actually delivered it, so a
           // failed/suppressed final send still lets the accumulated-text fallback run.
           deliveredMedia: payloadHasMedia && isRoutedReplyDelivered(result),
+          // Delivered-to-user: false on suppress/fail. Drives the accumulated-block
+          // fallback so a hook-suppressed final (ok but not delivered) is not dropped.
+          deliveredFinal: isRoutedReplyDelivered(result),
         };
       }
       throwIfFinalDeliveryAborted();
@@ -2317,6 +2325,7 @@ export async function dispatchReplyFromConfig(
         queuedFinal,
         routedFinalCount: 0,
         deliveredMedia: payloadHasMedia && queuedFinal,
+        deliveredFinal: queuedFinal,
       };
     };
 
@@ -3164,6 +3173,7 @@ export async function dispatchReplyFromConfig(
     let queuedFinal = false;
     let routedFinalCount = 0;
     let deliveredFinalTtsMedia = false;
+    let deliveredFinalToUser = false;
     let attemptedFinalDelivery = false;
     let finalDeliveryFailed = false;
     // Explicit command turns (native or authorized text-slash like /compact) are
@@ -3205,6 +3215,7 @@ export async function dispatchReplyFromConfig(
       const finalReply = await sendFinalPayload(reply);
       queuedFinal = finalReply.queuedFinal || queuedFinal;
       deliveredFinalTtsMedia = finalReply.deliveredMedia || deliveredFinalTtsMedia;
+      deliveredFinalToUser = finalReply.deliveredFinal || deliveredFinalToUser;
       routedFinalCount += finalReply.routedFinalCount;
       if (!finalReply.queuedFinal && finalReply.routedFinalCount === 0) {
         finalDeliveryFailed = true;
@@ -3228,7 +3239,10 @@ export async function dispatchReplyFromConfig(
       if (
         ttsMode === "final" &&
         !deliveredFinalTtsMedia &&
-        !queuedFinal &&
+        // Gate on delivered-to-user, not the handled flag: a hook-suppressed final
+        // sets queuedFinal (handled) but never reaches the user, so the synth + text
+        // fallback must still run. Genuine deliveries keep this blocked.
+        !deliveredFinalToUser &&
         blockCount > 0 &&
         accumulatedBlockTtsText.trim()
       ) {
