@@ -579,13 +579,17 @@ What to do:
      ~/Library/LaunchAgents/ai.openclaw.node.plist.disabled
    ```
 
-4. Reinstall or repair the intended gateway service, then restart it:
+4. Restart the existing gateway service without regenerating the wrapper:
 
    ```bash
-   openclaw doctor --fix
-   openclaw gateway install --force
    openclaw gateway restart
    ```
+
+   Do not run `openclaw gateway install --force` as part of this workaround on
+   current releases unless the generated wrapper has also been fixed upstream.
+   Reinstall regenerates
+   `~/.openclaw/service-env/ai.openclaw.gateway-env-wrapper.sh` and can erase
+   the manual `unset OPENCLAW_LAUNCHD_LABEL ...` repair you just applied.
 
 After the fix, the 30-second PID sample should show one stable process instead
 of a rotating set of PIDs, and inbound channel dispatch should resume without
