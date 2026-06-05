@@ -73,6 +73,7 @@ import {
   normalizeOpenAIStrictToolParameters,
   resolveOpenAIStrictToolFlagForInventory,
 } from "./openai-tool-schema.js";
+import { resolveProviderEndpoint } from "./provider-attribution.js";
 import { resolveProviderRequestPolicyConfig } from "./provider-request-config.js";
 import {
   buildGuardedModelFetch,
@@ -4203,11 +4204,12 @@ export function buildOpenAICompletionsParams(
     rawCompat?.supportsReasoningEffort === true ||
     Array.isArray(rawCompat?.supportedReasoningEfforts) ||
     Boolean(rawCompat?.reasoningEffortMap && typeof rawCompat.reasoningEffortMap === "object");
+  const endpointClass = resolveProviderEndpoint(model.baseUrl).endpointClass;
   const omitChatCompletionsToolReasoningEffort =
     hasTools &&
     (isOpenAIGpt54MiniModel(model) ||
       (isOpenAIGpt55Model(model) &&
-        model.provider === "azure-openai" &&
+        endpointClass === "azure-openai" &&
         !hasExplicitReasoningEffortCompat));
   const handledQwenThinkingFormat = applyQwenOpenAICompletionsThinkingParams({
     compatThinkingFormat: compat.thinkingFormat,
