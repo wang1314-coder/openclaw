@@ -714,11 +714,7 @@ export async function createChatSession(state: AppViewState): Promise<boolean> {
   state.lastError = null;
   state.chatError = null;
   const previousSessionKey = state.sessionKey;
-  const parentSessionKey = state.sessionsResult?.sessions.some(
-    (row) => row.key === previousSessionKey,
-  )
-    ? previousSessionKey
-    : undefined;
+  const parentSessionKey = normalizeOptionalString(previousSessionKey);
   const nextSessionKey = await createSessionAndRefresh(
     state as unknown as Parameters<typeof createSessionAndRefresh>[0],
     {

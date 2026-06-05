@@ -820,6 +820,42 @@ describe("createChatSession", () => {
     expect(loadChatHistoryMock).toHaveBeenCalledWith(state);
   });
 
+  it("keeps the selected session as parent when the session list is stale", async () => {
+    const state = createChatSessionState({
+      sessionsResult: {
+        ts: 0,
+        path: "",
+        count: 1,
+        defaults: { modelProvider: "openai", model: "gpt-5", contextTokens: null },
+        sessions: [row({ key: "agent:ops:dashboard:older" })],
+      },
+    });
+    createSessionAndRefreshMock.mockResolvedValue("agent:ops:dashboard:new-chat");
+    refreshChatAvatarMock.mockResolvedValue(undefined);
+    refreshSlashCommandsMock.mockResolvedValue(undefined);
+    loadChatHistoryMock.mockResolvedValue(undefined);
+    loadSessionsMock.mockResolvedValue(undefined);
+
+    await createChatSession(state);
+
+    expect(createSessionAndRefreshMock).toHaveBeenCalledWith(
+      state,
+      {
+        agentId: "ops",
+        parentSessionKey: "agent:ops:main",
+        emitCommandHooks: true,
+      },
+      {
+        activeMinutes: 120,
+        limit: 50,
+        includeGlobal: true,
+        includeUnknown: true,
+        showArchived: false,
+        agentId: "ops",
+      },
+    );
+  });
+
   it("creates selected global sessions under the same agent used for refresh", async () => {
     const state = createChatSessionState({
       sessionKey: "global",
