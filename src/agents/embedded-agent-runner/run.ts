@@ -100,6 +100,7 @@ import { runAgentCleanupStep } from "../run-cleanup-timeout.js";
 import { buildAgentRuntimeAuthPlan } from "../runtime-plan/auth.js";
 import { buildAgentRuntimePlan } from "../runtime-plan/build.js";
 import { ensureRuntimePluginsLoaded } from "../runtime-plugins.js";
+import type { AgentMessage } from "../runtime/index.js";
 import { resolveSessionSuspensionReason, suspendSession } from "../session-suspension.js";
 import { resolveToolLoopDetectionConfig } from "../tool-loop-detection-config.js";
 import { derivePromptTokens, normalizeUsage, type UsageLike } from "../usage.js";
@@ -170,6 +171,7 @@ import {
   extractPlanningOnlyPlanDetails,
   resolveEmptyResponseRetryInstruction,
   resolveIncompleteTurnPayloadText,
+  isTruncatedTerminalAssistantTurn,
   resolvePlanningOnlyRetryLimit,
   resolvePlanningOnlyRetryInstruction,
   resolveReasoningOnlyRetryInstruction,
@@ -3238,6 +3240,22 @@ export async function runEmbeddedAgent(
                 timedOut,
                 attempt,
               });
+          // Surface truncated response detection so operators can diagnose
+          // sessions that would otherwise go silent. (#89051)
+          if (
+            incompleteTurnText &&
+            isTruncatedTerminalAssistantTurn({
+              lastAssistant: (attempt.currentAttemptAssistant ??
+                sessionLastAssistant) as AgentMessage | null,
+            })
+          ) {
+            log.warn(
+              `truncated API response detected: runId=${params.runId} sessionId=${params.sessionId} ` +
+                `provider=${activeErrorContext.provider}/${activeErrorContext.model} ` +
+                `stopReason=${sessionLastAssistant?.stopReason ?? "missing"} payloadCount=${payloadCount} ` +
+                `postCompaction=${attemptCompactionCount > 0} — surfacing incomplete-turn error`,
+            );
+          }
           if (
             !emptyAssistantReplyIsSilent &&
             attemptCompactionCount > 0 &&
