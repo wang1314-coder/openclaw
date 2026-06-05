@@ -1,5 +1,9 @@
 {
   "fallbackKeys": [
+    "activity.answerCandidate.candidate",
+    "activity.answerCandidate.selected",
+    "activity.answerCandidate.superseded",
+    "activity.itemId",
     "cron.jobDetail.command",
     "cron.jobDetail.cwd",
     "skillWorkshop.header.useCurrentChat",
@@ -34,12 +38,12 @@
     "workboard.unknownStatus",
     "workboard.viewDetails"
   ],
-  "generatedAt": "2026-06-10T18:02:12.554Z",
+  "generatedAt": "2026-06-12T00:55:38.601Z",
   "locale": "uk",
   "model": "claude-opus-4-8",
   "provider": "anthropic",
-  "sourceHash": "d31dac3a16f784afca7d2c01a614ceeb2d90bb455a67114a0830a3c045210715",
-  "totalKeys": 1335,
+  "sourceHash": "17840543fe65f717b79799c4ed57b36649adc84f909a818a83dfc0fddc9e390d",
+  "totalKeys": 1339,
   "translatedKeys": 1302,
   "workflow": 1
 }
