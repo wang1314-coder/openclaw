@@ -327,4 +327,55 @@ describe("convertResponsesMessages", () => {
     });
     expect(functionCall).not.toHaveProperty("id");
   });
+
+  it("omits encrypted reasoning content when requested by native ChatGPT callers", () => {
+    const input = convertResponsesMessages(
+      nativeOpenAIModel,
+      {
+        messages: [
+          {
+            role: "assistant",
+            api: nativeOpenAIModel.api,
+            provider: nativeOpenAIModel.provider,
+            model: nativeOpenAIModel.id,
+            usage: {
+              input: 0,
+              output: 0,
+              cacheRead: 0,
+              cacheWrite: 0,
+              totalTokens: 0,
+              cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+            },
+            stopReason: "toolUse",
+            timestamp: 1,
+            content: [
+              {
+                type: "thinking",
+                thinking: "Need a tool.",
+                thinkingSignature: JSON.stringify({
+                  type: "reasoning",
+                  id: "rs_prior",
+                  encrypted_content: "ciphertext",
+                }),
+              },
+            ],
+          },
+        ],
+      } satisfies Context,
+      allowedToolCallProviders,
+      {
+        includeSystemPrompt: false,
+        replayResponsesItemIds: false,
+        replayEncryptedReasoningContent: false,
+      },
+    ) as unknown as Array<Record<string, unknown>>;
+
+    const reasoningItem = input.find((item) => item.type === "reasoning");
+    expect(reasoningItem).toMatchObject({
+      type: "reasoning",
+      summary: [],
+    });
+    expect(reasoningItem).not.toHaveProperty("id");
+    expect(reasoningItem).not.toHaveProperty("encrypted_content");
+  });
 });

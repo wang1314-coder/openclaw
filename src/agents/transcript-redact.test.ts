@@ -28,6 +28,8 @@ function cfg(mode: "tools" | "off", patterns?: string[]): OpenClawConfig {
 }
 
 const EMAIL_PATTERN = String.raw`([\w]|[-.])+@([\w]|[-.])+\.\w+`;
+const CIPHERTEXT_WITH_TOKEN_SHAPED_BYTES =
+  "gAAAAABpQnQrXzzZqcAfo3unbAY-ku84xgsvB0fpLkbDvSh3WS5qzfSCmcgwr8_abcdefghijvK2RyV2GQ4ohzcfYwhRwTvY76TvR7Tvr_";
 
 describe("redactTranscriptMessage", () => {
   it("redacts text block matching default patterns (sk- token)", () => {
@@ -48,6 +50,75 @@ describe("redactTranscriptMessage", () => {
     const result = redactTranscriptMessage(msg, cfg("tools"));
     const block = (msgContent(result) as Array<{ thinking: string }>)[0];
     expect(block.thinking).not.toContain("sk-abcdef1234567890xyz");
+  });
+
+  it("preserves OpenAI encrypted reasoning inside thinkingSignature", () => {
+    const thinkingSignature = JSON.stringify({
+      type: "reasoning",
+      encrypted_content: CIPHERTEXT_WITH_TOKEN_SHAPED_BYTES,
+      summary: [],
+    });
+    const msg = {
+      role: "assistant",
+      content: [
+        {
+          type: "thinking",
+          thinking: "secret sk-abcdef1234567890xyz",
+          thinkingSignature,
+        },
+      ],
+    } as unknown as AgentMessage;
+
+    const result = redactTranscriptMessage(msg, cfg("tools"));
+    const block = (msgContent(result) as Array<{ thinking: string; thinkingSignature: string }>)[0];
+    expect(block.thinking).not.toContain("sk-abcdef1234567890xyz");
+    expect(block.thinkingSignature).toBe(thinkingSignature);
+    expect(block.thinkingSignature).toContain(CIPHERTEXT_WITH_TOKEN_SHAPED_BYTES);
+    expect(block.thinkingSignature).not.toContain("…");
+  });
+
+  it("preserves opaque encrypted_content fields while redacting siblings", () => {
+    const msg = {
+      role: "assistant",
+      content: [
+        {
+          type: "gatewayCustom",
+          encrypted_content: CIPHERTEXT_WITH_TOKEN_SHAPED_BYTES,
+          payload: {
+            apiKey: "plainsecretvalue123",
+          },
+        },
+      ],
+    } as unknown as AgentMessage;
+
+    const result = redactTranscriptMessage(msg, cfg("tools"));
+    const block = (
+      msgContent(result) as Array<{ encrypted_content: string; payload: { apiKey: string } }>
+    )[0];
+    expect(block.encrypted_content).toBe(CIPHERTEXT_WITH_TOKEN_SHAPED_BYTES);
+    expect(block.payload.apiKey).toBe("plains…e123");
+  });
+
+  it("preserves Anthropic redacted_thinking data while redacting siblings", () => {
+    const msg = {
+      role: "assistant",
+      content: [
+        {
+          type: "redacted_thinking",
+          data: CIPHERTEXT_WITH_TOKEN_SHAPED_BYTES,
+          metadata: {
+            accessToken: "nestedplainsecret123",
+          },
+        },
+      ],
+    } as unknown as AgentMessage;
+
+    const result = redactTranscriptMessage(msg, cfg("tools"));
+    const block = (
+      msgContent(result) as Array<{ data: string; metadata: { accessToken: string } }>
+    )[0];
+    expect(block.data).toBe(CIPHERTEXT_WITH_TOKEN_SHAPED_BYTES);
+    expect(block.metadata.accessToken).toBe("nested…t123");
   });
 
   it("redacts partialJson block", () => {
