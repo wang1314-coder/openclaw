@@ -1,3 +1,4 @@
+// Doctor config-flow tests cover config repair, migration, stripping, and validation orchestration.
 import fs from "node:fs/promises";
 import path from "node:path";
 import { withTempHome } from "openclaw/plugin-sdk/test-env";
@@ -1576,6 +1577,54 @@ describe("doctor config flow", () => {
       params: { refresh: true },
       timeoutMs: 3000,
     });
+  });
+
+  it("previews and repairs hooks token reuse of gateway auth", async () => {
+    const config = {
+      gateway: {
+        auth: {
+          mode: "token",
+          token: "shared-gateway-token-1234567890",
+        },
+      },
+      hooks: {
+        enabled: true,
+        token: "shared-gateway-token-1234567890",
+      },
+    };
+    const previewNotes = resetTerminalNoteMock();
+    const preview = await runDoctorConfigWithInput({
+      config,
+      run: loadAndMaybeMigrateDoctorConfig,
+    });
+
+    expect(preview.shouldWriteConfig).toBe(false);
+    expect(preview.cfg.hooks?.token).toBe("shared-gateway-token-1234567890");
+    expect(
+      previewNotes.mock.calls.some(
+        ([message, title]) =>
+          title === "Doctor changes preview" &&
+          message.includes("Rotated hooks.token because it reused active Gateway"),
+      ),
+    ).toBe(true);
+    expect(
+      previewNotes.mock.calls.some(
+        ([message, title]) =>
+          title === "Doctor" &&
+          message.includes("openclaw doctor --fix") &&
+          message.includes("rotate hooks.token"),
+      ),
+    ).toBe(true);
+
+    const repair = await runDoctorConfigWithInput({
+      config,
+      repair: true,
+      run: loadAndMaybeMigrateDoctorConfig,
+    });
+
+    expect(repair.shouldWriteConfig).toBe(true);
+    expect(repair.cfg.hooks?.token).toMatch(/^[0-9a-f]{48}$/);
+    expect(repair.cfg.hooks?.token).not.toBe("shared-gateway-token-1234567890");
   });
 
   it("does not warn on mutable account allowlists when dangerous name matching is inherited", async () => {
