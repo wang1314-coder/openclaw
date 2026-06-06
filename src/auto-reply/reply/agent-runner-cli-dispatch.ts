@@ -240,6 +240,14 @@ export async function runCliAgentWithLifecycle(params: {
     }
 
     if (emitLifecycleTerminal) {
+      const yieldedLifecycleData =
+        result.meta.yielded === true
+          ? {
+              yielded: true,
+              livenessState: result.meta.livenessState,
+              stopReason: result.meta.stopReason,
+            }
+          : {};
       emitAgentEvent({
         runId: params.runId,
         stream: "lifecycle",
@@ -247,6 +255,7 @@ export async function runCliAgentWithLifecycle(params: {
           phase: "end",
           startedAt,
           endedAt: Date.now(),
+          ...yieldedLifecycleData,
         },
       });
       lifecycleTerminalEmitted = true;
