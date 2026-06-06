@@ -20,7 +20,7 @@ different `exec` contracts:
 
 - Codex Code Mode is enabled for Codex app-server threads unless restricted
   tool policy disables native code mode. It runs in the Codex coding harness,
-  where the model writes shell commands through an `exec.command` contract.
+  where the model writes raw JavaScript or TypeScript source through an `exec` contract.
 - OpenClaw code mode is disabled unless `tools.codeMode.enabled: true` is
   configured. It runs in the OpenClaw generic agent runtime, where the model
   writes JavaScript or TypeScript programs through an `exec.code` contract.
