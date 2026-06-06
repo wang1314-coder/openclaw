@@ -143,28 +143,36 @@ export function resolveEmbeddedCompactionTarget(params: {
   };
 }
 
-function resolveCompactionModelAlias(
+const resolveCompactionModelAlias = (
   config: OpenClawConfig | undefined,
   alias: string,
-): { provider: string; model: string } | undefined {
+): { provider: string; model: string } | undefined => {
   const models = config?.agents?.defaults?.models;
-  if (!models) return undefined;
+  if (!models) {
+    return undefined;
+  }
   const normalizedAlias = alias.trim().toLowerCase();
   for (const [keyRaw, entryRaw] of Object.entries(models)) {
-    if (keyRaw.endsWith("/*")) continue;
+    if (keyRaw.endsWith("/*")) {
+      continue;
+    }
     const entryAlias = ((entryRaw as { alias?: string } | undefined)?.alias ?? "")
       .trim()
       .toLowerCase();
-    if (!entryAlias || entryAlias !== normalizedAlias) continue;
-    const slash = keyRaw.indexOf("/");
-    if (slash <= 0) continue;
+    if (!entryAlias || entryAlias !== normalizedAlias) {
+      continue;
+    }
+    const slashIdx = keyRaw.indexOf("/");
+    if (slashIdx <= 0) {
+      continue;
+    }
     return {
-      provider: keyRaw.slice(0, slash).trim(),
-      model: keyRaw.slice(slash + 1).trim(),
+      provider: keyRaw.slice(0, slashIdx).trim(),
+      model: keyRaw.slice(slashIdx + 1).trim(),
     };
   }
   return undefined;
-}
+};
 
 function shouldUseCodexRuntimeProviderForCompaction(params: {
   config?: OpenClawConfig;
