@@ -1140,6 +1140,50 @@ describe("cron controller", () => {
     expect(errors.deliveryTo).toBe("cron.errors.webhookUrlInvalid");
   });
 
+  it("flags non-numeric Telegram announce To targets before save (#90467)", () => {
+    const errors = validateCronForm({
+      ...DEFAULT_CRON_FORM,
+      name: "tg",
+      payloadKind: "agentTurn",
+      payloadText: "ping",
+      sessionTarget: "isolated",
+      deliveryMode: "announce",
+      deliveryChannel: "telegram",
+      deliveryTo: "gmail-cleaner",
+    });
+    expect(errors.deliveryTo).toBe("cron.errors.telegramChatIdInvalid");
+  });
+
+  it("accepts numeric Telegram chat ids and topic suffixes", () => {
+    for (const target of ["-1001234567890", "123456789", "-1001234567890:42", "-100123:topic:7"]) {
+      const errors = validateCronForm({
+        ...DEFAULT_CRON_FORM,
+        name: "tg",
+        payloadKind: "agentTurn",
+        payloadText: "ping",
+        sessionTarget: "isolated",
+        deliveryMode: "announce",
+        deliveryChannel: "telegram",
+        deliveryTo: target,
+      });
+      expect(errors.deliveryTo).toBeUndefined();
+    }
+  });
+
+  it("ignores Telegram chat id format on non-telegram channels", () => {
+    const errors = validateCronForm({
+      ...DEFAULT_CRON_FORM,
+      name: "discord",
+      payloadKind: "agentTurn",
+      payloadText: "ping",
+      sessionTarget: "isolated",
+      deliveryMode: "announce",
+      deliveryChannel: "discord",
+      deliveryTo: "ops",
+    });
+    expect(errors.deliveryTo).toBeUndefined();
+  });
+
   it("blocks add/update submit when validation errors exist", async () => {
     const request = vi.fn(async () => ({}));
     const state = createState({

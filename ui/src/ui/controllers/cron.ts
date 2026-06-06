@@ -166,6 +166,16 @@ export function validateCronForm(form: CronFormState): CronFieldErrors {
       errors.deliveryTo = "cron.errors.webhookUrlInvalid";
     }
   }
+  if (form.deliveryMode === "announce" && form.deliveryChannel === "telegram") {
+    // Telegram send.ts rejects non-numeric targets at runtime; mirror the
+    // contract (numeric chatId, optional :topicId or :topic:topicId suffix)
+    // from extensions/telegram/src/targets.ts so the dashboard catches the
+    // mistake before save.
+    const target = form.deliveryTo.trim();
+    if (target && !/^-?\d+(?::topic:\d+|:\d+)?$/.test(target)) {
+      errors.deliveryTo = "cron.errors.telegramChatIdInvalid";
+    }
+  }
   if (form.failureAlertMode === "custom") {
     const afterRaw = form.failureAlertAfter.trim();
     if (afterRaw) {
