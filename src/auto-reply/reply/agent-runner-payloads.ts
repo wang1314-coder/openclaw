@@ -177,6 +177,7 @@ export async function buildReplyPayloads(params: {
   messagingToolSentTargets?: MessagingToolSend[];
   originatingChannel?: OriginatingChannelType;
   originatingTo?: string;
+  originatingThreadId?: string | number;
   accountId?: string;
   extractMarkdownImages?: boolean;
   normalizeMediaPaths?: (payload: ReplyPayload) => Promise<ReplyPayload>;
@@ -279,6 +280,7 @@ export async function buildReplyPayloads(params: {
     originatingTo: resolveOriginMessageTo({
       originatingTo: params.originatingTo,
     }),
+    originatingThreadId: params.originatingThreadId,
     accountId: resolveOriginAccountId({
       originatingAccountId: params.accountId,
     }),
