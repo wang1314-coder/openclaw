@@ -119,6 +119,21 @@ export function resolveEmbeddedCompactionTarget(params: {
       authProfileId,
     };
   }
+  const resolved = resolveCompactionModelAlias(params.config, override);
+  if (resolved) {
+    const resolvedProvider = resolved.provider || provider;
+    const resolvedModel = resolved.model;
+    const aliasAuthProfileId =
+      resolvedProvider !== (params.provider ?? "")?.trim()
+        ? undefined
+        : (params.authProfileId ?? undefined);
+    return {
+      provider: resolvedProvider,
+      ...resolveTargetProviders(resolvedProvider, aliasAuthProfileId),
+      model: resolvedModel,
+      authProfileId: aliasAuthProfileId,
+    };
+  }
   const authProfileId = params.authProfileId ?? undefined;
   return {
     provider,
@@ -126,6 +141,29 @@ export function resolveEmbeddedCompactionTarget(params: {
     model: override,
     authProfileId,
   };
+}
+
+function resolveCompactionModelAlias(
+  config: OpenClawConfig | undefined,
+  alias: string,
+): { provider: string; model: string } | undefined {
+  const models = config?.agents?.defaults?.models;
+  if (!models) return undefined;
+  const normalizedAlias = alias.trim().toLowerCase();
+  for (const [keyRaw, entryRaw] of Object.entries(models)) {
+    if (keyRaw.endsWith("/*")) continue;
+    const entryAlias = ((entryRaw as { alias?: string } | undefined)?.alias ?? "")
+      .trim()
+      .toLowerCase();
+    if (!entryAlias || entryAlias !== normalizedAlias) continue;
+    const slash = keyRaw.indexOf("/");
+    if (slash <= 0) continue;
+    return {
+      provider: keyRaw.slice(0, slash).trim(),
+      model: keyRaw.slice(slash + 1).trim(),
+    };
+  }
+  return undefined;
 }
 
 function shouldUseCodexRuntimeProviderForCompaction(params: {
