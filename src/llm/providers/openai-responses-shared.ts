@@ -47,6 +47,7 @@ type ReplayableResponseReasoningItem = Omit<ResponseReasoningItem, "id"> & { id?
 function normalizeResponsesReasoningReplayItem(params: {
   item: ReplayableResponseReasoningItem;
   replayResponsesItemIds: boolean;
+  replayEncryptedReasoningContent: boolean;
 }): ReplayableResponseReasoningItem {
   const next = { ...(params.item as ReplayableResponseReasoningItem & Record<string, unknown>) };
   if (!Array.isArray(next.summary)) {
@@ -54,6 +55,9 @@ function normalizeResponsesReasoningReplayItem(params: {
   }
   if (!params.replayResponsesItemIds) {
     delete next.id;
+  }
+  if (!params.replayEncryptedReasoningContent) {
+    delete next.encrypted_content;
   }
   return next as ReplayableResponseReasoningItem;
 }
@@ -123,6 +127,7 @@ export interface OpenAIResponsesStreamOptions {
 export interface ConvertResponsesMessagesOptions {
   includeSystemPrompt?: boolean;
   replayResponsesItemIds?: boolean;
+  replayEncryptedReasoningContent?: boolean;
 }
 export { convertResponsesTools };
 export type { ConvertResponsesToolsOptions } from "./openai-responses-tools.js";
@@ -174,6 +179,7 @@ export function convertResponsesMessages<TApi extends Api>(
 ): ResponseInput {
   const messages: ResponseInput = [];
   const shouldReplayResponsesItemIds = options?.replayResponsesItemIds ?? true;
+  const shouldReplayEncryptedReasoningContent = options?.replayEncryptedReasoningContent ?? true;
 
   const normalizeIdPart = (part: string): string => {
     const sanitized = part.replace(/[^a-zA-Z0-9_-]/g, "_");
@@ -268,6 +274,7 @@ export function convertResponsesMessages<TApi extends Api>(
             const reasoningItem = normalizeResponsesReasoningReplayItem({
               item: JSON.parse(block.thinkingSignature) as ReplayableResponseReasoningItem,
               replayResponsesItemIds: shouldReplayResponsesItemIds,
+              replayEncryptedReasoningContent: shouldReplayEncryptedReasoningContent,
             });
             output.push(reasoningItem as ResponseInputItem);
             previousReplayItemWasReasoning = true;

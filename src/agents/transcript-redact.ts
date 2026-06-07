@@ -54,6 +54,28 @@ function isPlainTranscriptObject(value: object): value is Record<string, unknown
   return prototype === Object.prototype || prototype === null;
 }
 
+const OPAQUE_TRANSCRIPT_FIELD_KEYS = new Set([
+  "encrypted_content",
+  "thinkingSignature",
+  "thoughtSignature",
+  "thought_signature",
+]);
+
+function isOpaqueTranscriptField(fieldKey: string | undefined): boolean {
+  return fieldKey !== undefined && OPAQUE_TRANSCRIPT_FIELD_KEYS.has(fieldKey);
+}
+
+function isOpaqueTranscriptObjectField(source: Record<string, unknown>, key: string): boolean {
+  if (typeof source[key] !== "string") {
+    return false;
+  }
+  const type = source.type;
+  return (
+    (type === "redacted_thinking" && key === "data") ||
+    ((type === "thinking" || type === "redacted_thinking") && key === "signature")
+  );
+}
+
 function redactTranscriptStructuredValue(
   value: unknown,
   cfg?: OpenClawConfig,
@@ -61,6 +83,9 @@ function redactTranscriptStructuredValue(
   seen: WeakSet<object> = new WeakSet<object>(),
 ): unknown {
   if (typeof value === "string") {
+    if (isOpaqueTranscriptField(fieldKey)) {
+      return value;
+    }
     if (fieldKey) {
       return redactTranscriptStructuredFieldValue(fieldKey, value, cfg);
     }
@@ -98,6 +123,9 @@ function redactTranscriptStructuredValue(
   const source = value;
   let next: Record<string, unknown> | null = null;
   for (const [key, item] of Object.entries(source)) {
+    if (isOpaqueTranscriptObjectField(source, key)) {
+      continue;
+    }
     const redacted = redactTranscriptStructuredValue(item, cfg, key, seen);
     if (redacted === item) {
       continue;

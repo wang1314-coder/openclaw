@@ -482,6 +482,7 @@ function buildRequestBody(
   const messages = convertResponsesMessages(model, context, CODEX_TOOL_CALL_PROVIDERS, {
     includeSystemPrompt: false,
     replayResponsesItemIds: false,
+    replayEncryptedReasoningContent: false,
   });
 
   const body: RequestBody = {
@@ -1495,6 +1496,7 @@ async function processWebSocketStream(
         {
           includeSystemPrompt: false,
           replayResponsesItemIds: false,
+          replayEncryptedReasoningContent: false,
         },
       ).filter((item) => item.type !== "function_call_output");
       entry.continuation = {

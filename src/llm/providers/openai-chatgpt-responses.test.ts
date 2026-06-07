@@ -151,7 +151,7 @@ describe("streamOpenAICodexResponses transport", () => {
     expect(result.errorMessage).toContain("Request timed out after 5ms");
   });
 
-  it("does not replay Responses item ids for store-disabled ChatGPT requests", async () => {
+  it("does not replay Responses item ids or encrypted reasoning for store-disabled ChatGPT requests", async () => {
     let capturedPayload:
       | {
           store?: unknown;
@@ -228,10 +228,10 @@ describe("streamOpenAICodexResponses transport", () => {
     const reasoningItem = capturedPayload?.input?.find((item) => item.type === "reasoning");
     expect(reasoningItem).toMatchObject({
       type: "reasoning",
-      encrypted_content: "ciphertext",
       summary: [],
     });
     expect(reasoningItem).not.toHaveProperty("id");
+    expect(reasoningItem).not.toHaveProperty("encrypted_content");
     const messageItem = capturedPayload?.input?.find((item) => item.type === "message");
     expect(messageItem).toMatchObject({
       type: "message",
