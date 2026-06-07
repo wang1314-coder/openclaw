@@ -52,8 +52,14 @@ function isLongTtlEligibleEndpoint(baseUrl: string | undefined): boolean {
   if (!hostname) {
     return false;
   }
+  // OpenRouter proxies Anthropic and honors per-block `cache_control` markers,
+  // including the 1-hour `ttl: "1h"` extension (per OpenRouter prompt-caching
+  // docs). Treat it as long-TTL-eligible so env-driven and conservative
+  // defaults reach OpenRouter-routed Anthropic models the same way they reach
+  // api.anthropic.com directly.
   return (
     hostname === "api.anthropic.com" ||
+    hostname === "openrouter.ai" ||
     hostname === "aiplatform.googleapis.com" ||
     hostname.endsWith("-aiplatform.googleapis.com")
   );
