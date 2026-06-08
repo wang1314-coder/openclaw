@@ -650,6 +650,22 @@ describe("Windows startup fallback", () => {
     });
   });
 
+  it("keeps legacy Startup-folder vbs entries visible after hidden launcher opt-out", async () => {
+    await withWindowsEnv("openclaw-win-startup-", async ({ env }) => {
+      addStartupFallbackMissingResponses();
+      await writeStartupFallbackEntry(env, "vbs");
+
+      await expect(
+        isScheduledTaskInstalled({
+          env: {
+            ...env,
+            OPENCLAW_WINDOWS_TASK_HIDDEN_LAUNCHER: "0",
+          },
+        }),
+      ).resolves.toBe(true);
+    });
+  });
+
   it("removes legacy Startup-folder cmd entries after hidden launcher opt-in", async () => {
     await withWindowsEnv("openclaw-win-startup-", async ({ env }) => {
       schtasksResponses.push({ code: 0, stdout: "", stderr: "" });
@@ -660,6 +676,24 @@ describe("Windows startup fallback", () => {
         env: {
           ...env,
           OPENCLAW_WINDOWS_TASK_HIDDEN_LAUNCHER: "1",
+        },
+        stdout,
+      });
+
+      await expect(fs.access(startupEntryPath)).rejects.toThrow();
+    });
+  });
+
+  it("removes legacy Startup-folder vbs entries after hidden launcher opt-out", async () => {
+    await withWindowsEnv("openclaw-win-startup-", async ({ env }) => {
+      schtasksResponses.push({ code: 0, stdout: "", stderr: "" });
+      const startupEntryPath = await writeStartupFallbackEntry(env, "vbs");
+      const stdout = new PassThrough();
+
+      await uninstallScheduledTask({
+        env: {
+          ...env,
+          OPENCLAW_WINDOWS_TASK_HIDDEN_LAUNCHER: "0",
         },
         stdout,
       });
