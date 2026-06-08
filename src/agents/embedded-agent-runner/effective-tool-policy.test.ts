@@ -228,6 +228,20 @@ describe("applyFinalEffectiveToolPolicy", () => {
     expect(warnings.filter((message) => message.includes("llm-task"))).toStrictEqual([]);
   });
 
+  it("does not warn when a plugin id is enabled through plugins.allow", () => {
+    const warnings: string[] = [];
+    applyFinalEffectiveToolPolicy({
+      bundledTools: [makeTool("mcp__bundle__read")],
+      config: {
+        plugins: { allow: ["llm-task"] },
+        tools: { allow: ["llm-task"] },
+      },
+      warn: (message) => warnings.push(message),
+    });
+
+    expect(warnings.filter((message) => message.includes("llm-task"))).toStrictEqual([]);
+  });
+
   it("keeps bundle MCP tools in the coding profile via plugin metadata", () => {
     const mcpTool = makeTool("bundleProbe__bundle_probe");
     setPluginToolMeta(mcpTool, { pluginId: "bundle-mcp", optional: false });
