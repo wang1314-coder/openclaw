@@ -130,7 +130,7 @@ function normalizeProviderForComparison(value?: string): string | undefined {
   return lowered;
 }
 
-function normalizeThreadIdForComparison(value?: string): string | undefined {
+function normalizeThreadIdForComparison(value?: unknown): string | undefined {
   return stringifyRouteThreadId(value);
 }
 
@@ -184,6 +184,7 @@ function targetsMatchForDedupe(params: {
   provider: string;
   originTarget: string;
   targetKey: string;
+  originThreadId?: string;
   targetThreadId?: string;
 }): boolean {
   const pluginMatch = getChannelPlugin(params.provider)?.outbound?.targetsMatchForReplySuppression;
@@ -194,6 +195,9 @@ function targetsMatchForDedupe(params: {
       targetThreadId: normalizeThreadIdForComparison(params.targetThreadId),
     });
   }
+  if (params.originThreadId || params.targetThreadId) {
+    return false;
+  }
   return params.targetKey === params.originTarget;
 }
 
@@ -203,6 +207,7 @@ export function shouldDedupeMessagingToolRepliesForRoute(params: {
   messagingToolSentTargets?: MessagingToolSend[];
   originatingTo?: string;
   accountId?: string;
+  originatingThreadId?: string | number;
 }): boolean {
   return getMatchingMessagingToolReplyTargets(params).length > 0;
 }
@@ -213,6 +218,7 @@ export function getMatchingMessagingToolReplyTargets(params: {
   messagingToolSentTargets?: MessagingToolSend[];
   originatingTo?: string;
   accountId?: string;
+  originatingThreadId?: string | number;
 }): MessagingToolSend[] {
   const provider = normalizeProviderForComparison(params.messageProvider);
   if (!provider) {
@@ -242,6 +248,7 @@ export function getMatchingMessagingToolReplyTargets(params: {
       provider,
       rawTarget: originRawTarget,
       accountId: routeAccount,
+      threadId: stringifyRouteThreadId(params.originatingThreadId),
     });
     if (!originRoute) {
       return false;
@@ -262,6 +269,7 @@ export function getMatchingMessagingToolReplyTargets(params: {
       provider,
       originTarget: originRoute.to,
       targetKey: targetRoute.to,
+      originThreadId: normalizeThreadIdForComparison(originRoute.threadId),
       targetThreadId: target.threadId,
     });
   });
@@ -283,6 +291,7 @@ export function resolveMessagingToolPayloadDedupe(params: {
   messagingToolSentTargets?: MessagingToolSend[];
   originatingTo?: string;
   accountId?: string;
+  originatingThreadId?: string | number;
 }): MessagingToolPayloadDedupeDecision {
   const sentTargets = params.messagingToolSentTargets ?? [];
   const matchingTargets = getMatchingMessagingToolReplyTargets({
@@ -290,6 +299,7 @@ export function resolveMessagingToolPayloadDedupe(params: {
     messagingToolSentTargets: sentTargets,
     originatingTo: params.originatingTo,
     accountId: params.accountId,
+    originatingThreadId: params.originatingThreadId,
   });
   const matchingRoute = matchingTargets.length > 0;
   const routeSentTexts = matchingTargets.flatMap((target) =>

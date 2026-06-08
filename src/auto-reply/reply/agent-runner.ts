@@ -1545,6 +1545,7 @@ export async function runReplyAgent(params: {
           to: sessionCtx.To,
         }),
         accountId: sessionCtx.AccountId,
+        originatingThreadId: replyRouteThreadId,
         normalizeMediaPaths: replyMediaContext.normalizePayload,
       });
       const replyPayloads = payloadResult.replyPayloads.map((payload) =>
@@ -1949,6 +1950,7 @@ export async function runReplyAgent(params: {
         to: sessionCtx.To,
       }),
       accountId: sessionCtx.AccountId,
+      originatingThreadId: replyRouteThreadId,
       normalizeMediaPaths: replyMediaContext.normalizePayload,
     });
     const { replyPayloads } = payloadResult;
