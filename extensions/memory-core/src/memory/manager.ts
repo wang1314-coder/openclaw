@@ -749,6 +749,9 @@ export class MemoryIndexManager extends MemoryManagerEmbeddingOps implements Mem
     try {
       queryVec = await this.embedQueryWithRetry(cleaned, opts?.signal);
     } catch (err) {
+      if (opts?.signal?.aborted) {
+        throw err;
+      }
       const message = formatErrorMessage(err);
       const activatedFallback = this.shouldFallbackOnError(err)
         ? await this.activateFallbackProvider(message).catch((fallbackErr: unknown) => {
