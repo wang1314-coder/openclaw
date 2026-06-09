@@ -1,17 +1,42 @@
+function isWordCharacter(char: string | undefined): boolean {
+  return char !== undefined && /[\p{L}\p{N}_]/u.test(char);
+}
+
+function isInWordApostrophe(chars: string[], index: number): boolean {
+  return (
+    chars[index] === "'" && isWordCharacter(chars[index - 1]) && isWordCharacter(chars[index + 1])
+  );
+}
+
+function opensQuotedSpan(chars: string[], index: number): boolean {
+  const quote = chars[index];
+  if (isInWordApostrophe(chars, index)) {
+    return false;
+  }
+  for (let j = index + 1; j < chars.length; j++) {
+    if (chars[j] === quote && !isInWordApostrophe(chars, j)) {
+      return true;
+    }
+  }
+  return false;
+}
+
 /** Parse an argument string using simple shell-style single and double quotes. */
 export function parseCommandArgs(argsString: string): string[] {
   const args: string[] = [];
+  const chars = Array.from(argsString);
   let current = "";
   let inQuote: string | null = null;
 
-  for (const char of argsString) {
+  for (let i = 0; i < chars.length; i++) {
+    const char = chars[i];
     if (inQuote) {
-      if (char === inQuote) {
+      if (char === inQuote && !isInWordApostrophe(chars, i)) {
         inQuote = null;
       } else {
         current += char;
       }
-    } else if (char === '"' || char === "'") {
+    } else if ((char === '"' || char === "'") && opensQuotedSpan(chars, i)) {
       inQuote = char;
     } else if (/\s/.test(char)) {
       if (current) {
