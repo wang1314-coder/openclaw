@@ -65,6 +65,9 @@ export type AssistantStreamDelivery = {
 
 /** Mutable subscription state shared by embedded-agent event handlers. */
 export type EmbeddedAgentSubscribeState = {
+  /** Message count when the current compaction started. Used to scope
+   *  stale-usage clearing to pre-compaction messages only. (#50795) */
+  preCompactionMessageCount?: number;
   assistantTexts: string[];
   toolMetas: Array<{
     toolName?: string;
