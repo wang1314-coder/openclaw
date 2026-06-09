@@ -19,6 +19,7 @@ import { buildChatItems, type BuildChatItemsProps } from "../chat/build-chat-ite
 import { renderChatQueue } from "../chat/chat-queue.ts";
 import { buildRawSidebarContent } from "../chat/chat-sidebar-raw.ts";
 import { renderWelcomeState, resolveAssistantDisplayAvatar } from "../chat/chat-welcome.ts";
+import { resolveCodeBlockCopyText } from "../chat/code-block-copy.ts";
 import { renderContextNotice } from "../chat/context-notice.ts";
 import { DeletedMessages } from "../chat/deleted-messages.ts";
 import { exportChatMarkdown } from "../chat/export.ts";
@@ -1562,11 +1563,14 @@ export function renderChat(props: ChatProps) {
   const historyRenderLimit = resolveChatHistoryRenderWindow(props);
 
   const handleCodeBlockCopy = (e: Event) => {
-    const btn = (e.target as HTMLElement).closest(".code-block-copy");
+    const target = e.target as HTMLElement | null;
+    const btn = target?.closest(".code-block-copy") as HTMLElement | null;
     if (!btn) {
       return;
     }
-    const code = (btn as HTMLElement).dataset.code ?? "";
+    e.preventDefault();
+    e.stopPropagation();
+    const code = resolveCodeBlockCopyText(btn);
     navigator.clipboard.writeText(code).then(
       () => {
         btn.classList.add("copied");
