@@ -2967,6 +2967,8 @@ export async function runEmbeddedAgent(
             lastAssistant: attempt.lastAssistant,
             currentAssistant: currentAttemptAssistant ?? null,
             lastToolError: attempt.lastToolError,
+            hasVisibleBlockReplyAfterLastToolExecution:
+              attempt.hasVisibleBlockReplyAfterLastToolExecution,
             config: params.config,
             isCronTrigger: params.trigger === "cron",
             isHeartbeatTrigger: params.trigger === "heartbeat",
