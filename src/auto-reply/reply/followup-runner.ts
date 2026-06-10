@@ -940,6 +940,7 @@ export function createFollowupRunner(params: {
                     agentAccountId: run.agentAccountId,
                     disableTools: opts?.disableTools,
                     abortSignal: runAbortSignal,
+                    onUserInputPrompt: opts?.onBlockReply,
                   },
                 });
                 if (droppedCliSessionReplacement) {
