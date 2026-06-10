@@ -2,7 +2,7 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   testing as replyRunTesting,
   createReplyOperation,
@@ -16,6 +16,7 @@ import {
   createUserTurnTranscriptRecorder,
   type UserTurnTranscriptRecorder,
 } from "../sessions/user-turn-transcript.js";
+import { runSkillResearchAutoCapture } from "../skills/research/autocapture.js";
 import { captureEnv, setTestEnvValue } from "../test-utils/env.js";
 import { runPreparedCliAgent } from "./cli-runner.js";
 import {
@@ -35,11 +36,16 @@ vi.mock("../plugins/hook-runner-global.js", () => ({
   getGlobalHookRunner: vi.fn(() => null),
 }));
 
+vi.mock("../skills/research/autocapture.js", () => ({
+  runSkillResearchAutoCapture: vi.fn(),
+}));
+
 vi.mock("../tts/tts.js", () => ({
   buildTtsSystemPromptHint: vi.fn(() => undefined),
 }));
 
 const mockGetGlobalHookRunner = vi.mocked(getGlobalHookRunner);
+const mockSkillResearchAutoCapture = vi.mocked(runSkillResearchAutoCapture);
 const hookRunnerGlobalStateKey = Symbol.for("openclaw.plugins.hook-runner-global-state");
 let sessionFileEnvSnapshot: ReturnType<typeof captureEnv> | undefined;
 
@@ -136,10 +142,12 @@ function buildPreparedContext(params?: {
   cliSessionId?: string;
   runId?: string;
   lane?: string;
+  trigger?: PreparedCliRunContext["params"]["trigger"];
   openClawHistoryPrompt?: string;
   provider?: string;
   model?: string;
   allowEmptyAssistantReplyAsSilent?: boolean;
+  config?: OpenClawConfig;
 }): PreparedCliRunContext {
   // Common prepared context fixture for runPreparedCliAgent reliability branches.
   const provider = params?.provider ?? "codex-cli";
@@ -166,7 +174,9 @@ function buildPreparedContext(params?: {
       timeoutMs: 1_000,
       runId: params?.runId ?? "run-2",
       lane: params?.lane,
+      trigger: params?.trigger,
       allowEmptyAssistantReplyAsSilent: params?.allowEmptyAssistantReplyAsSilent,
+      ...(params?.config ? { config: params.config } : {}),
     },
     started: Date.now(),
     workspaceDir: "/tmp",
@@ -272,8 +282,14 @@ const CLI_RESEED_PROMPT =
   "Continue this conversation using the OpenClaw transcript below as prior session history.\n\n<conversation_history>\nUser: earlier context\n</conversation_history>\n\n<next_user_message>\nhi\n</next_user_message>";
 
 describe("runCliAgent reliability", () => {
+  beforeEach(() => {
+    mockSkillResearchAutoCapture.mockReset();
+    mockSkillResearchAutoCapture.mockResolvedValue(undefined);
+  });
+
   afterEach(() => {
     replyRunTesting.resetReplyRunRegistry();
+    mockSkillResearchAutoCapture.mockReset();
     mockGetGlobalHookRunner.mockReset();
     setHookRunnerForTest(null);
     vi.unstubAllEnvs();
@@ -1210,6 +1226,59 @@ describe("runCliAgent reliability", () => {
     expect(resolved).toBe(false);
 
     releaseAgentEnd();
+    await expect(run).resolves.toMatchObject({
+      payloads: [{ text: "hello from cli" }],
+    });
+    expect(resolved).toBe(true);
+  });
+
+  it("waits for Skill Research auto-capture before resolving direct CLI runs", async () => {
+    let releaseCapture: () => void = () => undefined;
+    const captureSettled = new Promise<void>((resolve) => {
+      releaseCapture = resolve;
+    });
+    mockSkillResearchAutoCapture.mockReturnValueOnce(captureSettled);
+
+    supervisorSpawnMock.mockResolvedValueOnce(
+      createManagedRun({
+        reason: "exit",
+        exitCode: 0,
+        exitSignal: null,
+        durationMs: 50,
+        stdout: "hello from cli",
+        stderr: "",
+        timedOut: false,
+        noOutputTimedOut: false,
+      }),
+    );
+
+    let resolved = false;
+    const run = runPreparedCliAgent(
+      buildPreparedContext({
+        sessionKey: "manual-proof-87504",
+        trigger: "manual",
+        config: {
+          skills: {
+            workshop: {
+              autonomous: {
+                enabled: true,
+              },
+            },
+          },
+        },
+      }),
+    ).then((result) => {
+      resolved = true;
+      return result;
+    });
+
+    await vi.waitFor(() => {
+      expect(mockSkillResearchAutoCapture).toHaveBeenCalledTimes(1);
+    });
+    await Promise.resolve();
+    expect(resolved).toBe(false);
+
+    releaseCapture();
     await expect(run).resolves.toMatchObject({
       payloads: [{ text: "hello from cli" }],
     });
