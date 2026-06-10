@@ -242,6 +242,62 @@ describe("applyFinalEffectiveToolPolicy", () => {
     expect(warnings.filter((message) => message.includes("llm-task"))).toStrictEqual([]);
   });
 
+  it("warns when plugin loading is globally disabled", () => {
+    const warnings: string[] = [];
+    applyFinalEffectiveToolPolicy({
+      bundledTools: [makeTool("mcp__bundle__read")],
+      config: {
+        plugins: { enabled: false, allow: ["llm-task"] },
+        tools: { allow: ["llm-task"] },
+      },
+      warn: (message) => warnings.push(message),
+    });
+
+    expect(warnings.filter((message) => message.includes("llm-task"))).toHaveLength(1);
+  });
+
+  it("warns when a plugin id is denied despite plugins.allow", () => {
+    const warnings: string[] = [];
+    applyFinalEffectiveToolPolicy({
+      bundledTools: [makeTool("mcp__bundle__read")],
+      config: {
+        plugins: { allow: ["llm-task"], deny: ["llm-task"] },
+        tools: { allow: ["llm-task"] },
+      },
+      warn: (message) => warnings.push(message),
+    });
+
+    expect(warnings.filter((message) => message.includes("llm-task"))).toHaveLength(1);
+  });
+
+  it("warns when a plugin id is individually disabled despite plugins.allow", () => {
+    const warnings: string[] = [];
+    applyFinalEffectiveToolPolicy({
+      bundledTools: [makeTool("mcp__bundle__read")],
+      config: {
+        plugins: { allow: ["llm-task"], entries: { "llm-task": { enabled: false } } },
+        tools: { allow: ["llm-task"] },
+      },
+      warn: (message) => warnings.push(message),
+    });
+
+    expect(warnings.filter((message) => message.includes("llm-task"))).toHaveLength(1);
+  });
+
+  it("warns when an enabled plugin entry is outside the restrictive plugin allowlist", () => {
+    const warnings: string[] = [];
+    applyFinalEffectiveToolPolicy({
+      bundledTools: [makeTool("mcp__bundle__read")],
+      config: {
+        plugins: { allow: ["other-plugin"], entries: { "llm-task": { enabled: true } } },
+        tools: { allow: ["llm-task"] },
+      },
+      warn: (message) => warnings.push(message),
+    });
+
+    expect(warnings.filter((message) => message.includes("llm-task"))).toHaveLength(1);
+  });
+
   it("keeps bundle MCP tools in the coding profile via plugin metadata", () => {
     const mcpTool = makeTool("bundleProbe__bundle_probe");
     setPluginToolMeta(mcpTool, { pluginId: "bundle-mcp", optional: false });

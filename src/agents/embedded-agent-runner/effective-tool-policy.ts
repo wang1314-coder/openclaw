@@ -21,13 +21,30 @@ import { mergeAlsoAllowPolicy, resolveToolProfilePolicy } from "../tool-policy.j
 import type { AnyAgentTool } from "../tools/common.js";
 
 function collectEnabledPluginIds(config: OpenClawConfig | undefined): string[] {
-  const ids = new Set<string>();
-  for (const pluginId of config?.plugins?.allow ?? []) {
-    ids.add(pluginId);
+  const plugins = config?.plugins;
+  if (!plugins || plugins.enabled === false) {
+    return [];
   }
-  const entries = config?.plugins?.entries;
-  for (const [pluginId, entry] of Object.entries(entries ?? {})) {
-    if (entry?.enabled === true) {
+  const deny = new Set(plugins.deny ?? []);
+  const allow = new Set(plugins.allow ?? []);
+  const entries = plugins.entries ?? {};
+  const isEffectivelyEnabled = (pluginId: string): boolean => {
+    if (deny.has(pluginId)) {
+      return false;
+    }
+    if (entries[pluginId]?.enabled === false) {
+      return false;
+    }
+    return allow.size === 0 || allow.has(pluginId);
+  };
+  const ids = new Set<string>();
+  for (const pluginId of allow) {
+    if (isEffectivelyEnabled(pluginId)) {
+      ids.add(pluginId);
+    }
+  }
+  for (const [pluginId, entry] of Object.entries(entries)) {
+    if (entry?.enabled === true && isEffectivelyEnabled(pluginId)) {
       ids.add(pluginId);
     }
   }
