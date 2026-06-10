@@ -34,6 +34,7 @@ import {
 } from "../../routing/session-key.js";
 import { resolveSkillsPromptForRun } from "../../skills/loading/workspace.js";
 import { resolveEmbeddedRunSkillEntries } from "../../skills/runtime/embedded-run-entries.js";
+import { resolveHookMessageProvider } from "../../utils/hook-message-provider.js";
 import {
   applySkillEnvOverrides,
   applySkillEnvOverridesFromSnapshot,
@@ -763,6 +764,10 @@ async function compactEmbeddedAgentSessionDirectOnce(
 
     const sessionLabel = params.sessionKey ?? params.sessionId;
     const resolvedMessageProvider = params.messageChannel ?? params.messageProvider;
+    const hookMessageProvider = resolveHookMessageProvider({
+      sessionKey: params.sessionKey,
+      provider: resolvedMessageProvider,
+    });
     const contextInjectionMode = resolveContextInjectionMode(params.config, effectiveSkillAgentId);
     const { contextFiles } =
       contextInjectionMode === "never"
@@ -1371,7 +1376,7 @@ async function compactEmbeddedAgentSessionDirectOnce(
             sessionKey: params.sessionKey,
             sessionAgentId,
             workspaceDir: effectiveWorkspace,
-            messageProvider: resolvedMessageProvider,
+            messageProvider: hookMessageProvider,
             metrics: beforeHookMetrics,
             onHookMessages: params.onCompactionHookMessages,
           });
@@ -1551,7 +1556,7 @@ async function compactEmbeddedAgentSessionDirectOnce(
             hookSessionKey,
             missingSessionKey,
             workspaceDir: effectiveWorkspace,
-            messageProvider: resolvedMessageProvider,
+            messageProvider: hookMessageProvider,
             messageCountAfter,
             tokensAfter,
             compactedCount,

@@ -70,6 +70,7 @@ export async function doctorCommand(runtime?: RuntimeEnv, options: DoctorOptions
   const { CONFIG_PATH } = await loadConfigModule();
   const ctx = {
     runtime: effectiveRuntime,
+    env: process.env,
     options,
     prompter,
     configResult,
