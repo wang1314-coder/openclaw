@@ -802,14 +802,23 @@ function resolveExplicitModelWithRegistry(params: {
     // Conditional suppressions (e.g. baseUrlHosts-gated qwen restrictions) are
     // intentionally bypassable when the user has explicitly configured the model.
     // (#74451)
-    if (
+    const suppressesInlineModel =
       shouldUnconditionallySuppress({
         provider,
         id: modelId,
         ...(cfg ? { config: cfg } : {}),
         ...(workspaceDir ? { workspaceDir } : {}),
-      })
-    ) {
+      }) ||
+      (isOpenAICodexSparkRef({ provider, modelId }) &&
+        shouldSuppressBuiltInModel({
+          provider,
+          id: modelId,
+          ...(inlineMatch.api ? { api: inlineMatch.api } : {}),
+          ...(inlineMatch.baseUrl ? { baseUrl: inlineMatch.baseUrl } : {}),
+          ...(cfg ? { config: cfg } : {}),
+          ...(workspaceDir ? { workspaceDir } : {}),
+        }));
+    if (suppressesInlineModel) {
       return { kind: "suppressed" };
     }
     const resolvedParams = mergeConfiguredRuntimeModelParams({
@@ -1747,9 +1756,16 @@ function buildUnknownModelError(params: {
   workspaceDir?: string;
   runtimeHooks?: ProviderRuntimeHooks;
 }): string {
+  const inlineMatch = findInlineModelMatch({
+    providers: params.cfg?.models?.providers ?? {},
+    provider: params.provider,
+    modelId: params.modelId,
+  });
   const suppressed = buildSuppressedBuiltInModelError({
     provider: params.provider,
     id: params.modelId,
+    ...(inlineMatch?.api ? { api: inlineMatch.api } : {}),
+    ...(inlineMatch?.baseUrl ? { baseUrl: inlineMatch.baseUrl } : {}),
     ...(params.cfg ? { config: params.cfg } : {}),
     ...(params.workspaceDir ? { workspaceDir: params.workspaceDir } : {}),
   });
