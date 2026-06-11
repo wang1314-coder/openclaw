@@ -17,7 +17,7 @@ import {
   type MemoryEmbeddingProbeResult,
   type MemoryProviderStatus,
   type MemorySearchManager,
-  type MemorySearchRuntimeDebug,
+  type MemorySearchOptions,
   type MemorySearchResult,
   type MemorySource,
   type MemorySyncProgressUpdate,
@@ -582,18 +582,7 @@ export class MemoryIndexManager extends MemoryManagerEmbeddingOps implements Mem
     return state;
   }
 
-  async search(
-    query: string,
-    opts?: {
-      maxResults?: number;
-      minScore?: number;
-      sessionKey?: string;
-      qmdSearchModeOverride?: "query" | "search" | "vsearch";
-      onDebug?: (debug: MemorySearchRuntimeDebug) => void;
-      /** When set, only these chunk sources are considered (must be enabled for this manager). */
-      sources?: MemorySource[];
-    },
-  ): Promise<MemorySearchResult[]> {
+  async search(query: string, opts?: MemorySearchOptions): Promise<MemorySearchResult[]> {
     opts?.onDebug?.({ backend: "builtin" });
     if (this.providerRequirement.mode === "required") {
       await this.ensureProviderInitialized();
@@ -758,8 +747,11 @@ export class MemoryIndexManager extends MemoryManagerEmbeddingOps implements Mem
 
     let queryVec: number[];
     try {
-      queryVec = await this.embedQueryWithRetry(cleaned);
+      queryVec = await this.embedQueryWithRetry(cleaned, opts?.signal);
     } catch (err) {
+      if (opts?.signal?.aborted) {
+        throw err;
+      }
       const message = formatErrorMessage(err);
       const activatedFallback = this.shouldFallbackOnError(err)
         ? await this.activateFallbackProvider(message).catch((fallbackErr: unknown) => {
@@ -778,7 +770,7 @@ export class MemoryIndexManager extends MemoryManagerEmbeddingOps implements Mem
           return [];
         }
         keywordResults = await loadKeywordResults();
-        queryVec = await this.embedQueryWithRetry(cleaned);
+        queryVec = await this.embedQueryWithRetry(cleaned, opts?.signal);
       } else if (!this.provider && this.fts.enabled && this.fts.available) {
         log.warn(`memory search: embeddings unavailable; using keyword-only results: ${message}`);
         return this.selectScoredResults(keywordResults, maxResults, minScore, 0);
