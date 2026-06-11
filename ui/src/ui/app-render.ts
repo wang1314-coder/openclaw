@@ -3306,6 +3306,10 @@ export function renderApp(state: AppViewState) {
           : nothing}
         ${state.tab === "skillWorkshop"
           ? renderLazyView(lazySkillWorkshop, (m) => {
+              const parsedWorkshopAgent = parseAgentSessionKey(state.sessionKey);
+              const workshopAgentId = parsedWorkshopAgent
+                ? normalizeAgentId(parsedWorkshopAgent.agentId)
+                : undefined;
               const visibleProposals = m.filterSkillWorkshopProposals(
                 state.skillWorkshopProposals,
                 state.skillWorkshopStatusFilter,
@@ -3322,7 +3326,11 @@ export function renderApp(state: AppViewState) {
                   selectedIndex < 0
                     ? 0
                     : (selectedIndex + delta + visibleProposals.length) % visibleProposals.length;
-                selectSkillWorkshopProposal(state, visibleProposals[nextIndex].key);
+                selectSkillWorkshopProposal(
+                  state,
+                  workshopAgentId,
+                  visibleProposals[nextIndex].key,
+                );
               };
               const selectVisibleFallback = (proposals: typeof visibleProposals) => {
                 if (
@@ -3332,7 +3340,7 @@ export function renderApp(state: AppViewState) {
                   return;
                 }
                 state.skillWorkshopFilePreviewKey = null;
-                selectSkillWorkshopProposal(state, proposals[0].key);
+                selectSkillWorkshopProposal(state, workshopAgentId, proposals[0].key);
               };
               return m.renderSkillWorkshop({
                 loading: state.skillWorkshopLoading,
@@ -3377,24 +3385,30 @@ export function renderApp(state: AppViewState) {
                 onModeChange: (mode) => setSkillWorkshopMode(state, mode),
                 onSelect: (key) => {
                   state.skillWorkshopFilePreviewKey = null;
-                  selectSkillWorkshopProposal(state, key);
+                  selectSkillWorkshopProposal(state, workshopAgentId, key);
                 },
                 onPrev: () => selectRelativeProposal(-1),
                 onNext: () => selectRelativeProposal(1),
-                onApply: (key) => void runSkillWorkshopLifecycleAction(state, "apply", key),
+                onApply: (key) =>
+                  void runSkillWorkshopLifecycleAction(state, workshopAgentId, "apply", key),
                 onRevise: (key) => {
                   state.skillWorkshopRevisionKey = key;
                   state.skillWorkshopRevisionDraft = "";
                 },
-                onReject: (key) => void runSkillWorkshopLifecycleAction(state, "reject", key),
+                onReject: (key) =>
+                  void runSkillWorkshopLifecycleAction(state, workshopAgentId, "reject", key),
                 onRevisionDraftChange: (draft) => (state.skillWorkshopRevisionDraft = draft),
                 onRevisionCancel: () => {
                   state.skillWorkshopRevisionKey = null;
                   state.skillWorkshopRevisionDraft = "";
                 },
                 onRevisionSubmit: (key) =>
-                  void requestSkillWorkshopRevision(state, key, (message, proposal) =>
-                    sendSkillWorkshopRevisionRequest(state, message, proposal),
+                  void requestSkillWorkshopRevision(
+                    state,
+                    workshopAgentId,
+                    key,
+                    (message, proposal) =>
+                      sendSkillWorkshopRevisionRequest(state, message, proposal),
                   ),
                 onPreviewFile: (key, path) => {
                   state.skillWorkshopSelectedKey = key;
