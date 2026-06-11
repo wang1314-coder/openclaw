@@ -138,6 +138,18 @@ describe("createModelListAuthIndex", () => {
 
     expect(index.hasProviderAuth("moonshot")).toBe(true);
     expect(index.hasProviderAuth("openai")).toBe(false);
+    expect(index.hasAnyProviderAuth()).toBe(true);
+  });
+
+  it("reports when no provider auth exists", () => {
+    const index = createModelListAuthIndex({
+      cfg: {},
+      authStore: emptyStore,
+      env: {},
+    });
+
+    expect(index.hasProviderAuth("openai")).toBe(false);
+    expect(index.hasAnyProviderAuth()).toBe(false);
   });
 
   it("checks resolver-only env auth on demand", () => {

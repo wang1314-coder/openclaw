@@ -16,7 +16,6 @@ import { loadModelCatalogForBrowse } from "../../agents/model-catalog-browse.js"
 import { resolveVisibleModelCatalog } from "../../agents/model-catalog-visibility.js";
 import { loadModelCatalog } from "../../agents/model-catalog.js";
 import { isModelPickerVisibleProvider } from "../../agents/model-picker-visibility.js";
-import { createProviderAuthChecker } from "../../agents/model-provider-auth.js";
 import { isCliRuntimeProvider } from "../../agents/model-runtime-aliases.js";
 import {
   buildModelAliasIndex,
@@ -29,6 +28,7 @@ import {
   RUNTIME_MODEL_VISIBILITY_NORMALIZATION,
   createModelVisibilityPolicy,
 } from "../../agents/model-visibility-policy.js";
+import { createProviderAuthChecker } from "../../agents/model-provider-auth.js";
 import { listOpenAIAuthProfileProvidersForAgentRuntime } from "../../agents/openai-routing.js";
 import { resolveDefaultAgentWorkspaceDir } from "../../agents/workspace.js";
 import { getChannelPlugin } from "../../channels/plugins/index.js";
@@ -161,19 +161,6 @@ export async function buildModelsProviderData(
     view: options.view ?? "default",
     loadCatalog: ({ readOnly }) => loadModelCatalog({ config: cfg, readOnly }),
   });
-  // Reuse one checker so browse visibility and later catalog merging share the
-  // same auth cache instead of redoing provider auth discovery twice.
-  const providerAuthChecker =
-    options.view === "all"
-      ? undefined
-      : createProviderAuthChecker({
-          cfg,
-          workspaceDir:
-            options.workspaceDir ??
-            (agentId ? resolveAgentWorkspaceDir(cfg, agentId) : undefined) ??
-            resolveDefaultAgentWorkspaceDir(),
-          agentId,
-        });
   const visibilityPolicy = createModelVisibilityPolicy({
     cfg,
     catalog,
@@ -194,8 +181,22 @@ export async function buildModelsProviderData(
       resolveDefaultAgentWorkspaceDir(),
     view: options.view,
     runtimeAuthDiscovery: false,
-    providerAuthChecker,
   });
+
+  const providerAuthChecker =
+    options.view === "all"
+      ? undefined
+      : createProviderAuthChecker({
+          cfg,
+          workspaceDir:
+            options.workspaceDir ??
+            (agentId ? resolveAgentWorkspaceDir(cfg, agentId) : undefined) ??
+            resolveDefaultAgentWorkspaceDir(),
+          agentId,
+          // Browse auth must stay bounded: avoid synthetic plugin and external CLI discovery.
+          allowPluginSyntheticAuth: false,
+          discoverExternalCliAuth: false,
+        });
 
   const aliasIndex = buildModelAliasIndex({
     cfg,
@@ -272,7 +273,10 @@ export async function buildModelsProviderData(
     add(entry.provider, entry.id);
   }
 
-  const hasAuth = options.view === "all" ? async () => true : providerAuthChecker!;
+  const hasAuth: (provider: string) => Promise<boolean> =
+    options.view === "all"
+      ? async () => true
+      : providerAuthChecker!;
 
   for (const entry of catalog) {
     if (usesUnfilteredCatalogModels(entry.provider) && (await hasAuth(entry.provider))) {

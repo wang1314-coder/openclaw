@@ -207,7 +207,7 @@ describe("models.list", () => {
     );
   });
 
-  it("loads the full catalog for provider-scoped configured view and filters only providers", async () => {
+  it("uses the read-only catalog for provider-scoped configured view and filters only providers", async () => {
     const catalog = [
       { id: "claude-test", name: "Claude Test", provider: "anthropic" },
       { id: "gpt-5.4-codex", name: "GPT-5.4 Codex", provider: "openai" },
@@ -253,7 +253,7 @@ describe("models.list", () => {
       },
       undefined,
     );
-    expect(loadConfiguredCatalog).toHaveBeenCalledWith({ readOnly: false });
+    expect(loadConfiguredCatalog).toHaveBeenCalledWith({ readOnly: true });
 
     const { request: allRequest, respond: allRespond } = requestModelsList({
       view: "all",

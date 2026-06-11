@@ -8,6 +8,7 @@ const mocks = vi.hoisted(() => ({
     throw new Error("runtime model suppression should be skipped");
   }),
   shouldSuppressBuiltInModelFromManifest: vi.fn(() => false),
+  loadModelCatalogForBrowse: vi.fn(),
 }));
 
 vi.mock("../../agents/model-suppression.js", () => ({
@@ -19,11 +20,16 @@ vi.mock("../../plugins/provider-runtime.js", () => ({
   normalizeProviderResolvedModelWithPlugin: mocks.normalizeProviderResolvedModelWithPlugin,
 }));
 
-import { appendProviderCatalogRows } from "./list.rows.js";
+vi.mock("../../agents/model-catalog-browse.js", () => ({
+  loadModelCatalogForBrowse: mocks.loadModelCatalogForBrowse,
+}));
+
+import { appendAuthenticatedCatalogRows, appendProviderCatalogRows } from "./list.rows.js";
 
 const authIndex = {
   hasProviderAuth: (provider: string) => provider === "codex",
   allowsProviderAuthAvailabilityFallback: () => false,
+  hasAnyProviderAuth: () => true,
 };
 
 function requireOnlyRow(rows: ModelRow[]): ModelRow {
@@ -115,6 +121,7 @@ describe("appendProviderCatalogRows", () => {
         authIndex: {
           hasProviderAuth: () => false,
           allowsProviderAuthAvailabilityFallback: () => false,
+          hasAnyProviderAuth: () => false,
         },
         configuredByKey: new Map(),
         discoveredKeys: new Set(),
@@ -164,6 +171,7 @@ describe("appendProviderCatalogRows", () => {
         authIndex: {
           hasProviderAuth: (provider: string) => provider === "openai",
           allowsProviderAuthAvailabilityFallback: (provider: string) => provider === "openai",
+          hasAnyProviderAuth: () => true,
         },
         configuredByKey: new Map([
           [
@@ -187,5 +195,34 @@ describe("appendProviderCatalogRows", () => {
     expect(row.key).toBe("openai/gpt-5.5");
     expect(row.available).toBe(true);
     expect(row.tags).toEqual(["configured"]);
+  });
+});
+
+describe("appendAuthenticatedCatalogRows", () => {
+  it("skips catalog loading when no provider auth exists", async () => {
+    const rows: ModelRow[] = [];
+
+    await appendAuthenticatedCatalogRows({
+      rows,
+      seenKeys: new Set(),
+      context: {
+        cfg: {
+          agents: { defaults: { model: { primary: "openai/gpt-5.5" } } },
+          models: { providers: {} },
+        },
+        agentDir: "/tmp/openclaw-agent",
+        authIndex: {
+          hasProviderAuth: () => false,
+          allowsProviderAuthAvailabilityFallback: () => false,
+          hasAnyProviderAuth: () => false,
+        },
+        configuredByKey: new Map(),
+        discoveredKeys: new Set(),
+        filter: { provider: undefined, local: false },
+      },
+    });
+
+    expect(mocks.loadModelCatalogForBrowse).not.toHaveBeenCalled();
+    expect(rows).toStrictEqual([]);
   });
 });

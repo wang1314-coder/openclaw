@@ -25,6 +25,7 @@ import { loadPluginRegistrySnapshotWithMetadata } from "../../plugins/plugin-reg
 export type ModelListAuthIndex = {
   hasProviderAuth(provider: string): boolean;
   allowsProviderAuthAvailabilityFallback(provider: string): boolean;
+  hasAnyProviderAuth(): boolean;
 };
 
 /** Inputs used to build the auth index without re-reading process-wide state. */
@@ -233,6 +234,9 @@ export function createModelListAuthIndex(
     },
     allowsProviderAuthAvailabilityFallback(provider: string): boolean {
       return hasOpenAICodexRuntimeAuth(provider);
+    },
+    hasAnyProviderAuth(): boolean {
+      return authenticatedProviders.size > 0 || syntheticAuthProviders.size > 0;
     },
   };
 }

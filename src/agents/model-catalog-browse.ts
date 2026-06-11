@@ -7,7 +7,6 @@ import {
 } from "@openclaw/normalization-core/number-coercion";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import type { ModelCatalogEntry } from "./model-catalog.types.js";
-import { parseConfiguredModelVisibilityEntries } from "./model-selection-shared.js";
 
 /**
  * Loads the model catalog shape used by browse/list commands without letting optional
@@ -53,10 +52,6 @@ export async function loadModelCatalogForBrowse(params: {
 }): Promise<ModelCatalogEntry[]> {
   const view = params.view ?? "default";
   if (view === "all") {
-    return await params.loadCatalog({ readOnly: false });
-  }
-  if (parseConfiguredModelVisibilityEntries({ cfg: params.cfg }).providerWildcards.size > 0) {
-    // Wildcards depend on provider discovery; read-only cached entries can hide matching models.
     return await params.loadCatalog({ readOnly: false });
   }
 

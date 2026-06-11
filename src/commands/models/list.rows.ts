@@ -24,6 +24,7 @@ import { isLocalBaseUrl, modelKey } from "./shared.js";
 type ConfiguredByKey = Map<string, ConfiguredEntry>;
 type ModelCatalogModule = typeof import("../../agents/model-catalog.js");
 type ModelResolverModule = typeof import("../../agents/embedded-agent-runner/model.js");
+type ModelCatalogBrowseModule = typeof import("../../agents/model-catalog-browse.js");
 type ProviderCatalogModule = typeof import("./list.provider-catalog.js");
 
 type RowFilter = {
@@ -48,6 +49,9 @@ export type RowBuilderContext = {
 const modelCatalogModuleLoader = createLazyImportLoader<ModelCatalogModule>(
   () => import("../../agents/model-catalog.js"),
 );
+const modelCatalogBrowseModuleLoader = createLazyImportLoader<ModelCatalogBrowseModule>(
+  () => import("../../agents/model-catalog-browse.js"),
+);
 const modelResolverModuleLoader = createLazyImportLoader<ModelResolverModule>(
   () => import("../../agents/embedded-agent-runner/model.js"),
 );
@@ -57,6 +61,10 @@ const providerCatalogModuleLoader = createLazyImportLoader<ProviderCatalogModule
 
 function loadModelCatalogModule(): Promise<ModelCatalogModule> {
   return modelCatalogModuleLoader.load();
+}
+
+function loadModelCatalogBrowseModule(): Promise<ModelCatalogBrowseModule> {
+  return modelCatalogBrowseModuleLoader.load();
 }
 
 function loadModelResolverModule(): Promise<ModelResolverModule> {
@@ -206,6 +214,25 @@ async function appendVisibleRow(params: {
   );
   params.seenKeys?.add(params.key);
   return true;
+}
+
+async function loadBrowseModelCatalog(params: {
+  cfg: OpenClawConfig;
+  metadataSnapshot?: PluginMetadataSnapshot;
+}): Promise<NormalizedModelCatalogRow[]> {
+  const [{ loadModelCatalog }, { loadModelCatalogForBrowse }] = await Promise.all([
+    loadModelCatalogModule(),
+    loadModelCatalogBrowseModule(),
+  ]);
+  return loadModelCatalogForBrowse({
+    cfg: params.cfg,
+    loadCatalog: ({ readOnly }) =>
+      loadModelCatalog({
+        config: params.cfg,
+        readOnly,
+        metadataSnapshot: params.metadataSnapshot,
+      }),
+  });
 }
 
 function resolveConfiguredModelInput(params: {
@@ -386,10 +413,11 @@ export async function appendAuthenticatedCatalogRows(params: {
   context: RowBuilderContext;
   seenKeys: Set<string>;
 }): Promise<void> {
-  const { loadModelCatalog } = await loadModelCatalogModule();
-  const catalog = await loadModelCatalog({
-    config: params.context.cfg,
-    readOnly: true,
+  if (!params.context.authIndex.hasAnyProviderAuth()) {
+    return;
+  }
+  const catalog = await loadBrowseModelCatalog({
+    cfg: params.context.cfg,
     metadataSnapshot: params.context.metadataSnapshot,
   });
   for (const entry of catalog) {
@@ -454,13 +482,9 @@ export async function appendCatalogSupplementRows(params: {
   context: RowBuilderContext;
   seenKeys: Set<string>;
 }): Promise<void> {
-  const [{ loadModelCatalog }, { resolveModelWithRegistry }] = await Promise.all([
-    loadModelCatalogModule(),
-    loadModelResolverModule(),
-  ]);
-  const catalog = await loadModelCatalog({
-    config: params.context.cfg,
-    readOnly: true,
+  const { resolveModelWithRegistry } = await loadModelResolverModule();
+  const catalog = await loadBrowseModelCatalog({
+    cfg: params.context.cfg,
     metadataSnapshot: params.context.metadataSnapshot,
   });
   for (const entry of catalog) {

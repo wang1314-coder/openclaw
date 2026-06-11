@@ -345,6 +345,7 @@ async function buildAllOpenAiCodexRows(opts: { supplementCatalog?: boolean } = {
     authIndex: {
       hasProviderAuth: (provider: string) => provider === "openai",
       allowsProviderAuthAvailabilityFallback: () => false,
+      hasAnyProviderAuth: () => true,
     },
     availableKeys: loaded.availableKeys,
     configuredByKey: new Map(),
@@ -687,6 +688,64 @@ describe("modelsListCommand forward-compat", () => {
         name: "Gemini 3.1 Flash Lite",
         available: true,
       });
+    });
+
+    it("falls back when authenticated catalog discovery is slow", async () => {
+      const config = {
+        agents: { defaults: { model: { primary: "google/gemini-test" } } },
+        models: {
+          providers: {
+            google: {
+              api: "openai-completions",
+              apiKey: "google-fixture",
+              baseUrl: "https://api.google.example/v1",
+              models: [{ id: "gemini-test", name: "Gemini Test" }],
+            },
+          },
+        },
+      };
+      mocks.loadModelsConfigWithSource.mockResolvedValueOnce({
+        sourceConfig: config,
+        resolvedConfig: config,
+        diagnostics: [],
+      });
+      mocks.ensureAuthProfileStore.mockReturnValueOnce({
+        version: 1,
+        profiles: {
+          "google:default": {
+            type: "api_key",
+            provider: "google",
+            key: "google-fixture",
+          },
+        },
+        order: {},
+      });
+      mocks.resolveConfiguredEntries.mockReturnValueOnce({
+        entries: [
+          {
+            key: "google/gemini-test",
+            ref: { provider: "google", model: "gemini-test" },
+            tags: new Set(["configured"]),
+            aliases: [],
+          },
+        ],
+      });
+      mocks.loadModelCatalog.mockImplementationOnce(() => new Promise(() => {}));
+      const runtime = createRuntime();
+
+      vi.useFakeTimers();
+      try {
+        const command = modelsListCommand({ json: true }, runtime as never);
+        await vi.advanceTimersByTimeAsync(800);
+        await command;
+      } finally {
+        vi.useRealTimers();
+      }
+
+      expectRowKeys(lastPrintedRows<{ key: string }>(), ["google/gemini-test"]);
+      expect(mocks.loadModelCatalog).toHaveBeenCalledWith(
+        expect.objectContaining({ readOnly: true }),
+      );
     });
 
     it("does not mark configured codex model as missing when forward-compat can build a fallback", async () => {
@@ -1309,6 +1368,7 @@ describe("modelsListCommand forward-compat", () => {
           authIndex: {
             hasProviderAuth: () => false,
             allowsProviderAuthAvailabilityFallback: () => false,
+            hasAnyProviderAuth: () => false,
           },
           availableKeys: new Set(["openai/gpt-5.4"]),
           configuredByKey: new Map(),
