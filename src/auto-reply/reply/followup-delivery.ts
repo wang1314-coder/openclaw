@@ -33,6 +33,7 @@ export function resolveFollowupDeliveryPayloads(params: {
   originatingChannel?: string;
   originatingChatType?: string | null;
   originatingTo?: string;
+  originatingThreadId?: string | number;
   sentMediaUrls?: string[];
   sentTargets?: MessagingToolSend[];
   sentTexts?: string[];
@@ -73,6 +74,7 @@ export function resolveFollowupDeliveryPayloads(params: {
     originatingTo: resolveOriginMessageTo({
       originatingTo: params.originatingTo,
     }),
+    originatingThreadId: params.originatingThreadId,
     accountId: resolveOriginAccountId({
       originatingAccountId: params.originatingAccountId,
     }),
