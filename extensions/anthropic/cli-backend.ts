@@ -47,6 +47,8 @@ export function buildAnthropicCliBackend(): CliBackendPlugin {
         "user",
         "--allowedTools",
         "mcp__openclaw__*",
+        "--disallowedTools",
+        "ScheduleWakeup,CronCreate",
       ],
       resumeArgs: [
         "-p",
@@ -58,6 +60,8 @@ export function buildAnthropicCliBackend(): CliBackendPlugin {
         "user",
         "--allowedTools",
         "mcp__openclaw__*",
+        "--disallowedTools",
+        "ScheduleWakeup,CronCreate",
         "--resume",
         "{sessionId}",
       ],
