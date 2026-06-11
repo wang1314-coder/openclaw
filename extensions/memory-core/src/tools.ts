@@ -46,6 +46,7 @@ type MemorySearchToolResult =
 
 const MEMORY_SEARCH_TOOL_TIMEOUT_MS = 15_000;
 const MEMORY_SEARCH_TOOL_COOLDOWN_MS = 60_000;
+const QMD_TOOL_DEADLINE_GRACE_MS = 10_000;
 
 const memorySearchToolCooldowns = new Map<string, { until: number; error: string }>();
 
@@ -380,8 +381,12 @@ export function createMemorySearchTool(options: {
           }
         };
 
+        const effectiveTimeoutMs = Math.max(
+          MEMORY_SEARCH_TOOL_TIMEOUT_MS,
+          (cfg.memory?.qmd?.limits?.timeoutMs ?? 0) + QMD_TOOL_DEADLINE_GRACE_MS,
+        );
         const outcome = await runMemorySearchToolWithDeadline({
-          timeoutMs: MEMORY_SEARCH_TOOL_TIMEOUT_MS,
+          timeoutMs: effectiveTimeoutMs,
           run: async () => {
             const { resolveMemoryBackendConfig } = await loadMemoryToolRuntime();
             const shouldQuerySupplements = requestedCorpus === "wiki" || requestedCorpus === "all";
