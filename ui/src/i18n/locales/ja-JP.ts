@@ -1646,6 +1646,8 @@ export const ja_JP: TranslationMap = {
     },
     jobDetail: {
       system: "システム",
+      command: "Command",
+      cwd: "CWD",
       prompt: "プロンプト",
       delivery: "配信",
       agent: "エージェント",

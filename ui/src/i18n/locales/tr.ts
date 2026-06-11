@@ -1648,6 +1648,8 @@ export const tr: TranslationMap = {
     },
     jobDetail: {
       system: "Sistem",
+      command: "Command",
+      cwd: "CWD",
       prompt: "İstem",
       delivery: "Teslimat",
       agent: "Aracı",

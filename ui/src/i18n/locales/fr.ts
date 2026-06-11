@@ -1659,6 +1659,8 @@ export const fr: TranslationMap = {
     },
     jobDetail: {
       system: "Système",
+      command: "Command",
+      cwd: "CWD",
       prompt: "Prompt",
       delivery: "Distribution",
       agent: "Agent",

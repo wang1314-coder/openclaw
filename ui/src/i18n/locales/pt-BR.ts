@@ -1643,6 +1643,8 @@ export const pt_BR: TranslationMap = {
     },
     jobDetail: {
       system: "Sistema",
+      command: "Command",
+      cwd: "CWD",
       prompt: "Prompt",
       delivery: "Entrega",
       agent: "Agente",

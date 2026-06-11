@@ -1631,6 +1631,8 @@ export const vi: TranslationMap = {
     },
     jobDetail: {
       system: "Hệ thống",
+      command: "Command",
+      cwd: "CWD",
       prompt: "Prompt",
       delivery: "Gửi",
       agent: "Agent",

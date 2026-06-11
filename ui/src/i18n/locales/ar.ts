@@ -1621,6 +1621,8 @@ export const ar: TranslationMap = {
     },
     jobDetail: {
       system: "النظام",
+      command: "Command",
+      cwd: "CWD",
       prompt: "المطالبة",
       delivery: "التسليم",
       agent: "الوكيل",

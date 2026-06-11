@@ -1605,6 +1605,8 @@ export const th: TranslationMap = {
     },
     jobDetail: {
       system: "ระบบ",
+      command: "Command",
+      cwd: "CWD",
       prompt: "พรอมป์ต์",
       delivery: "การส่ง",
       agent: "เอเจนต์",

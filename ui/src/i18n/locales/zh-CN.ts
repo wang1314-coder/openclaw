@@ -1600,6 +1600,8 @@ export const zh_CN: TranslationMap = {
     },
     jobDetail: {
       system: "系统",
+      command: "Command",
+      cwd: "CWD",
       prompt: "提示",
       delivery: "投递",
       agent: "代理",

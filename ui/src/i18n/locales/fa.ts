@@ -1639,6 +1639,8 @@ export const fa: TranslationMap = {
     },
     jobDetail: {
       system: "سیستم",
+      command: "Command",
+      cwd: "CWD",
       prompt: "پرامپت",
       delivery: "تحویل",
       agent: "عامل",

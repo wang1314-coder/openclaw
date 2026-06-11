@@ -1646,6 +1646,8 @@ export const uk: TranslationMap = {
     },
     jobDetail: {
       system: "Система",
+      command: "Command",
+      cwd: "CWD",
       prompt: "Запит",
       delivery: "Доставка",
       agent: "Агент",
