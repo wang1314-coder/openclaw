@@ -9,7 +9,7 @@ import {
   attachOpenClawTranscriptMeta,
   readRecentSessionMessagesWithStatsAsync,
   readSessionMessagesAsync,
-} from "./session-utils.js";
+} from "./session-transcript-readers.js";
 
 // Session history state owns the SSE-friendly projection of transcript JSONL:
 // raw messages are projected for display, paginated by transcript seq, then
@@ -41,6 +41,7 @@ type InlineSessionHistoryAppend = {
 };
 
 type SessionHistoryTranscriptTarget = {
+  agentId?: string;
   sessionId: string;
   storePath?: string;
   sessionFile?: string;
@@ -348,9 +349,12 @@ export class SessionHistorySseState {
   private async readRawSnapshotAsync(): Promise<SessionHistoryRawSnapshot> {
     if (this.cursor === undefined && typeof this.limit === "number") {
       const snapshot = await readRecentSessionMessagesWithStatsAsync(
-        this.target.sessionId,
-        this.target.storePath,
-        this.target.sessionFile,
+        {
+          agentId: this.target.agentId,
+          sessionFile: this.target.sessionFile,
+          sessionId: this.target.sessionId,
+          storePath: this.target.storePath,
+        },
         {
           ...resolveSessionHistoryTailReadOptions(this.limit),
         },
@@ -363,9 +367,12 @@ export class SessionHistorySseState {
     }
     return {
       rawMessages: await readSessionMessagesAsync(
-        this.target.sessionId,
-        this.target.storePath,
-        this.target.sessionFile,
+        {
+          agentId: this.target.agentId,
+          sessionFile: this.target.sessionFile,
+          sessionId: this.target.sessionId,
+          storePath: this.target.storePath,
+        },
         {
           mode: "full",
           reason: "session history cursor pagination",

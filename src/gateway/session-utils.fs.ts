@@ -152,8 +152,9 @@ export function readSessionMessages(
   sessionId: string,
   storePath: string | undefined,
   sessionFile?: string,
+  agentId?: string,
 ): unknown[] {
-  const candidates = resolveSessionTranscriptCandidates(sessionId, storePath, sessionFile);
+  const candidates = resolveSessionTranscriptCandidates(sessionId, storePath, sessionFile, agentId);
 
   const filePath = candidates.find((p) => fs.existsSync(p));
   if (!filePath) {
@@ -207,13 +208,14 @@ export function readRecentSessionMessages(
   storePath: string | undefined,
   sessionFile?: string,
   opts?: ReadRecentSessionMessagesOptions,
+  agentId?: string,
 ): unknown[] {
   const { maxMessages, maxBytes, maxLines } = normalizeRecentSessionReadOptions(opts);
   if (maxMessages === 0) {
     return [];
   }
 
-  const filePath = findExistingTranscriptPath(sessionId, storePath, sessionFile);
+  const filePath = findExistingTranscriptPath(sessionId, storePath, sessionFile, agentId);
   if (!filePath) {
     return [];
   }
@@ -537,8 +539,9 @@ export function visitSessionMessages(
   storePath: string | undefined,
   sessionFile: string | undefined,
   visit: (message: unknown, seq: number) => void,
+  agentId?: string,
 ): number {
-  const filePath = findExistingTranscriptPath(sessionId, storePath, sessionFile);
+  const filePath = findExistingTranscriptPath(sessionId, storePath, sessionFile, agentId);
   if (!filePath) {
     return 0;
   }
@@ -554,8 +557,9 @@ export function readSessionMessageCount(
   sessionId: string,
   storePath: string | undefined,
   sessionFile?: string,
+  agentId?: string,
 ): number {
-  const filePath = findExistingTranscriptPath(sessionId, storePath, sessionFile);
+  const filePath = findExistingTranscriptPath(sessionId, storePath, sessionFile, agentId);
   if (!filePath) {
     return 0;
   }
@@ -569,7 +573,7 @@ export function readSessionMessageCount(
   } catch {
     // Count from the transcript reader below when stat metadata is unavailable.
   }
-  const count = visitSessionMessages(sessionId, storePath, sessionFile, () => undefined);
+  const count = visitSessionMessages(sessionId, storePath, sessionFile, () => undefined, agentId);
   if (stat) {
     setCachedTranscriptMessageCount(filePath, stat, count);
   }
@@ -581,12 +585,19 @@ export async function readSessionMessagesAsync(
   storePath: string | undefined,
   sessionFile: string | undefined,
   opts: ReadSessionMessagesAsyncOptions,
+  agentId?: string,
 ): Promise<unknown[]> {
   if (opts.mode === "recent") {
     const { mode: _modeValue, ...recentOpts } = opts;
-    return await readRecentSessionMessagesAsync(sessionId, storePath, sessionFile, recentOpts);
+    return await readRecentSessionMessagesAsync(
+      sessionId,
+      storePath,
+      sessionFile,
+      recentOpts,
+      agentId,
+    );
   }
-  const filePath = findExistingTranscriptPath(sessionId, storePath, sessionFile);
+  const filePath = findExistingTranscriptPath(sessionId, storePath, sessionFile, agentId);
   if (!filePath) {
     return [];
   }
@@ -599,8 +610,9 @@ export async function readSessionMessageByIdAsync(
   storePath: string | undefined,
   sessionFile: string | undefined,
   messageId: string,
+  agentId?: string,
 ): Promise<{ message?: unknown; seq?: number; oversized: boolean; found: boolean }> {
-  const filePath = findExistingTranscriptPath(sessionId, storePath, sessionFile);
+  const filePath = findExistingTranscriptPath(sessionId, storePath, sessionFile, agentId);
   if (!filePath) {
     return { oversized: false, found: false };
   }
@@ -625,8 +637,9 @@ export async function visitSessionMessagesAsync(
   sessionFile: string | undefined,
   visit: (message: unknown, seq: number) => void,
   opts: { mode: "full"; reason: string; cache?: "reuse" | "skip" },
+  agentId?: string,
 ): Promise<number> {
-  const filePath = findExistingTranscriptPath(sessionId, storePath, sessionFile);
+  const filePath = findExistingTranscriptPath(sessionId, storePath, sessionFile, agentId);
   if (!filePath) {
     return 0;
   }
@@ -647,8 +660,9 @@ export async function readSessionMessageCountAsync(
   sessionId: string,
   storePath: string | undefined,
   sessionFile?: string,
+  agentId?: string,
 ): Promise<number> {
-  const filePath = findExistingTranscriptPath(sessionId, storePath, sessionFile);
+  const filePath = findExistingTranscriptPath(sessionId, storePath, sessionFile, agentId);
   if (!filePath) {
     return 0;
   }
@@ -675,9 +689,10 @@ export function readRecentSessionMessagesWithStats(
   storePath: string | undefined,
   sessionFile: string | undefined,
   opts: ReadRecentSessionMessagesOptions,
+  agentId?: string,
 ): ReadRecentSessionMessagesResult {
-  const totalMessages = readSessionMessageCount(sessionId, storePath, sessionFile);
-  const messages = readRecentSessionMessages(sessionId, storePath, sessionFile, opts);
+  const totalMessages = readSessionMessageCount(sessionId, storePath, sessionFile, agentId);
+  const messages = readRecentSessionMessages(sessionId, storePath, sessionFile, opts, agentId);
   const firstSeq = Math.max(1, totalMessages - messages.length + 1);
   const messagesWithSeq = messages.map((message, index) =>
     attachOpenClawTranscriptMeta(message, { seq: firstSeq + index }),
@@ -690,6 +705,7 @@ export async function readRecentSessionMessagesAsync(
   storePath: string | undefined,
   sessionFile?: string,
   opts?: ReadRecentSessionMessagesOptions,
+  agentId?: string,
 ): Promise<unknown[]> {
   const normalized = normalizeRecentSessionReadOptions(opts);
   const { maxMessages } = normalized;
@@ -697,7 +713,7 @@ export async function readRecentSessionMessagesAsync(
     return [];
   }
 
-  const filePath = findExistingTranscriptPath(sessionId, storePath, sessionFile);
+  const filePath = findExistingTranscriptPath(sessionId, storePath, sessionFile, agentId);
   if (!filePath) {
     return [];
   }
@@ -722,9 +738,21 @@ export async function readRecentSessionMessagesWithStatsAsync(
   storePath: string | undefined,
   sessionFile: string | undefined,
   opts: ReadRecentSessionMessagesOptions,
+  agentId?: string,
 ): Promise<ReadRecentSessionMessagesResult> {
-  const totalMessages = await readSessionMessageCountAsync(sessionId, storePath, sessionFile);
-  const messages = await readRecentSessionMessagesAsync(sessionId, storePath, sessionFile, opts);
+  const totalMessages = await readSessionMessageCountAsync(
+    sessionId,
+    storePath,
+    sessionFile,
+    agentId,
+  );
+  const messages = await readRecentSessionMessagesAsync(
+    sessionId,
+    storePath,
+    sessionFile,
+    opts,
+    agentId,
+  );
   const firstSeq = Math.max(1, totalMessages - messages.length + 1);
   const messagesWithSeq = messages.map((message, index) =>
     attachOpenClawTranscriptMeta(message, { seq: firstSeq + index }),
