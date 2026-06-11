@@ -351,6 +351,9 @@ const agentRunnerRuntimeLoader = createLazyImportLoader(() => import("./agent-ru
 const sessionUpdatesRuntimeLoader = createLazyImportLoader(
   () => import("./session-updates.runtime.js"),
 );
+const sessionAccessorRuntimeLoader = createLazyImportLoader(
+  () => import("../../config/sessions/session-accessor.js"),
+);
 
 function loadEmbeddedAgentRuntime() {
   return embeddedAgentRuntimeLoader.load();
@@ -362,6 +365,10 @@ function loadAgentRunnerRuntime() {
 
 function loadSessionUpdatesRuntime() {
   return sessionUpdatesRuntimeLoader.load();
+}
+
+function loadSessionAccessorRuntime() {
+  return sessionAccessorRuntimeLoader.load();
 }
 
 function stripPromptThinkingDirectives(body: string): string {
@@ -916,6 +923,20 @@ export async function runPreparedReply(
       // Execution fallbacks are turn-local; directive/model persistence owns
       // durable thinking remaps so explicit session overrides survive replies.
       resolvedThinkLevel = fallbackThinkLevel;
+      if (
+        sessionEntry &&
+        sessionStore &&
+        sessionKey &&
+        sessionEntry.thinkingLevel === previousThinkLevel
+      ) {
+        sessionEntry.thinkingLevel = fallbackThinkLevel;
+        sessionEntry.updatedAt = Date.now();
+        sessionStore[sessionKey] = sessionEntry;
+        if (storePath) {
+          const { upsertSessionEntry } = await loadSessionAccessorRuntime();
+          await upsertSessionEntry({ storePath, sessionKey }, sessionEntry);
+        }
+      }
     }
   }
   const internalOpts = opts as InternalGetReplyOptions | undefined;
