@@ -1278,6 +1278,7 @@ async function runStartupCatchupCandidate(
     job: candidate.job,
     startedAt,
   });
+  markCronJobActive(candidate.job.id);
   emit(state, {
     jobId: candidate.job.id,
     action: "started",
