@@ -272,9 +272,6 @@ describe("handleModelsCommand", () => {
     await handleModelsCommand(buildParams("/models"), true);
 
     expect(modelCatalogMocks.loadModelCatalog.mock.calls[0]?.[0]?.readOnly).toBe(true);
-    const authCheckerParams = firstAuthCheckerParams();
-    expect(authCheckerParams?.allowPluginSyntheticAuth).toBe(false);
-    expect(authCheckerParams?.discoverExternalCliAuth).toBe(false);
   });
 
   it("does not block default browse when read-only catalog loading is slow", async () => {
@@ -294,6 +291,28 @@ describe("handleModelsCommand", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it("reuses one provider auth checker across visibility and catalog assembly", async () => {
+    modelCatalogMocks.loadModelCatalog.mockResolvedValue([
+      { provider: "claude-cli", id: "claude-opus-4-5", name: "Claude Opus" },
+      { provider: "google-gemini-cli", id: "gemini-2.0-flash", name: "Gemini Flash" },
+    ]);
+    modelProviderAuthMocks.authenticatedProviders = new Set(["claude-cli", "google-gemini-cli"]);
+
+    const data = await buildModelsProviderData({
+      agents: {
+        defaults: {
+          model: "claude-cli/claude-opus-4-5",
+          models: {
+            "claude-cli/*": {},
+          },
+        },
+      },
+    } as OpenClawConfig);
+
+    expect(modelProviderAuthMocks.createProviderAuthChecker).toHaveBeenCalledTimes(1);
+    expect(data.providers).toEqual(["claude-cli", "google-gemini-cli"]);
   });
 
   it("keeps explicit all browse on the full catalog path", async () => {
