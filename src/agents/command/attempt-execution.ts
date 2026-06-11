@@ -211,15 +211,10 @@ function cliBackendAcceptsAuthProfileForwarding(params: {
   config: OpenClawConfig;
   agentId?: string;
 }): boolean {
-  if (params.provider !== "google-gemini-cli") {
-    return false;
-  }
-
-  return (
-    resolveCliBackendConfig(params.provider, params.config, {
-      agentId: params.agentId,
-    })?.acceptsAuthProfileForwarding === true
-  );
+  const backend = resolveCliBackendConfig(params.provider, params.config, {
+    agentId: params.agentId,
+  });
+  return backend?.id === "google-gemini-cli" && backend.prepareExecution !== undefined;
 }
 
 function resolveCliExecutionAuthProfileId(params: {
