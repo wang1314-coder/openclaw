@@ -26,12 +26,11 @@ describe("reparseProgramFromActionArgs", () => {
 
   it("uses action command name + args as fallback argv", async () => {
     const program = new Command().name("openclaw");
+    program.rawArgs = ["node", "openclaw", "status", "--json"];
     const parseAsync = vi.spyOn(program, "parseAsync").mockResolvedValue(program);
     const actionCommand = {
       name: () => "status",
-      parent: {
-        rawArgs: ["node", "openclaw", "status", "--json"],
-      },
+      parent: program,
     } as unknown as Command;
     resolveActionArgsMock.mockReturnValue(["--json"]);
 
@@ -47,10 +46,11 @@ describe("reparseProgramFromActionArgs", () => {
 
   it("falls back to action args without command name when action has no name", async () => {
     const program = new Command().name("openclaw");
+    program.rawArgs = ["node", "openclaw"];
     const parseAsync = vi.spyOn(program, "parseAsync").mockResolvedValue(program);
     const actionCommand = {
       name: () => "",
-      parent: {},
+      parent: program,
     } as unknown as Command;
     resolveActionArgsMock.mockReturnValue(["--json"]);
 
@@ -58,7 +58,7 @@ describe("reparseProgramFromActionArgs", () => {
 
     expect(buildParseArgvMock).toHaveBeenCalledWith({
       programName: "openclaw",
-      rawArgs: undefined,
+      rawArgs: ["node", "openclaw"],
       fallbackArgv: ["--json"],
     });
     expect(parseAsync).toHaveBeenCalledWith(["node", "openclaw", "status"]);
