@@ -1782,6 +1782,7 @@ function buildOpenAIClientHeaders(
   context: Context,
   optionHeaders?: Record<string, string>,
   turnHeaders?: Record<string, string>,
+  affinityHeadersValue?: string,
 ): Record<string, string> {
   const providerHeaders = { ...model.headers };
   if (model.provider === "github-copilot") {
@@ -1794,6 +1795,13 @@ function buildOpenAIClientHeaders(
     );
   }
   const callerHeaders = { ...optionHeaders, ...turnHeaders };
+
+  if (affinityHeadersValue) {
+    providerHeaders["x-session-affinity"] = affinityHeadersValue;
+    providerHeaders["x-client-request-id"] = affinityHeadersValue;
+    providerHeaders["session_id"] = affinityHeadersValue;
+  }
+
   const headers = resolveProviderRequestPolicyConfig({
     provider: model.provider,
     api: model.api,
@@ -2007,6 +2015,13 @@ function resolvePromptCacheKey(
     return undefined;
   }
   return clampOpenAIPromptCacheKey(options?.promptCacheKey ?? options?.sessionId);
+}
+
+function resolveAffinityHeadersValue(
+  options: Pick<BaseStreamOptions, "cacheRetention" | "promptCacheKey" | "sessionId"> | undefined,
+): string | undefined {
+  const cacheRetention = resolveCacheRetention(options?.cacheRetention);
+  return resolvePromptCacheKey(options, cacheRetention);
 }
 
 function getPromptCacheRetention(
@@ -2499,8 +2514,14 @@ function createOpenAICompletionsClient(
   context: Context,
   apiKey: string,
   optionHeaders?: Record<string, string>,
+  affinityHeadersValue?: string,
 ) {
-  const clientConfig = buildOpenAICompletionsClientConfig(model, context, optionHeaders);
+  const clientConfig = buildOpenAICompletionsClientConfig(
+    model,
+    context,
+    optionHeaders,
+    affinityHeadersValue,
+  );
   return new OpenAI({
     apiKey,
     baseURL: clientConfig.baseURL,
@@ -2524,12 +2545,20 @@ function buildOpenAICompletionsClientConfig(
   model: Model,
   context: Context,
   optionHeaders?: Record<string, string>,
+  affinityHeadersValue?: string,
 ): {
   baseURL: string;
   defaultHeaders: Record<string, string>;
   defaultQuery?: Record<string, string>;
 } {
-  const headers = buildOpenAIClientHeaders(model, context, optionHeaders);
+  const compat = getCompat(model);
+  const headers = buildOpenAIClientHeaders(
+    model,
+    context,
+    optionHeaders,
+    undefined,
+    compat.sendSessionAffinityHeaders ? affinityHeadersValue : undefined,
+  );
   const defaultQuery: Record<string, string> = {};
   let baseURL = model.baseUrl;
   let isAzureHost = false;
@@ -2592,7 +2621,14 @@ export function createOpenAICompletionsTransportStreamFn(): StreamFn {
       };
       try {
         const apiKey = options?.apiKey || getEnvApiKey(model.provider) || "";
-        const client = createOpenAICompletionsClient(model, context, apiKey, options?.headers);
+        const affinityHeadersValue = resolveAffinityHeadersValue(options);
+        const client = createOpenAICompletionsClient(
+          model,
+          context,
+          apiKey,
+          options?.headers,
+          affinityHeadersValue,
+        );
         let params = buildOpenAICompletionsParams(
           model as OpenAIModeModel,
           context,
@@ -3398,6 +3434,7 @@ function detectCompat(model: OpenAIModeModel) {
     requiresToolResultName: false,
     requiresAssistantAfterToolResult: false,
     requiresThinkingAsText: false,
+    sendSessionAffinityHeaders: false,
     thinkingFormat: compatDefaults.thinkingFormat,
     visibleReasoningDetailTypes: compatDefaults.visibleReasoningDetailTypes,
     openRouterRouting: {},
@@ -3424,6 +3461,7 @@ function getCompat(model: OpenAIModeModel): {
   vercelGatewayRouting: Record<string, unknown>;
   supportsStrictMode: boolean;
   supportsPromptCacheKey: boolean;
+  sendSessionAffinityHeaders: boolean;
   supportsLongCacheRetention: boolean;
   requiresStringContent: boolean;
   strictMessageKeys: boolean;
@@ -3456,6 +3494,8 @@ function getCompat(model: OpenAIModeModel): {
       (compat.vercelGatewayRouting as Record<string, unknown> | undefined) ??
       detected.vercelGatewayRouting,
     supportsStrictMode: compat.supportsStrictMode ?? detected.supportsStrictMode,
+    sendSessionAffinityHeaders:
+      compat.sendSessionAffinityHeaders ?? detected.sendSessionAffinityHeaders,
     supportsPromptCacheKey: compat.supportsPromptCacheKey === true,
     supportsLongCacheRetention: compat.supportsLongCacheRetention !== false,
     requiresStringContent: compat.requiresStringContent ?? false,
@@ -4320,6 +4360,7 @@ export const testing = {
   enforceCodeModeResponsesToolSurface,
   sanitizeOpenAICodexResponsesParams,
   buildOpenAICompletionsClientConfig,
+  resolveAffinityHeadersValue,
   processOpenAICompletionsStream,
   processResponsesStream,
   shouldEmitOpenAICompletionsReasoningForModel,
