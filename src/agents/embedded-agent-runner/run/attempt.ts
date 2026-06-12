@@ -4570,6 +4570,7 @@ export async function runEmbeddedAttempt(
         await sessionLockController.releaseForPrompt();
 
         if (
+          !yieldAborted &&
           requiresCompletionRequiredAsyncTaskWait({
             sessionKey: params.sessionKey,
             toolMetas,
