@@ -25,8 +25,9 @@ import { resolveSkillsPromptForRun } from "../../skills/loading/workspace.js";
 import { resolveUserPath } from "../../utils.js";
 import { resolveAgentDir, resolveSessionAgentIds } from "../agent-scope.js";
 import { externalCliDiscoveryForProviderAuth } from "../auth-profiles/external-cli-discovery.js";
+import { resolveApiKeyForProfile } from "../auth-profiles/oauth.js";
 import { loadAuthProfileStoreForRuntime } from "../auth-profiles/store.js";
-import type { AuthProfileCredential } from "../auth-profiles/types.js";
+import type { AuthProfileCredential, AuthProfileStore } from "../auth-profiles/types.js";
 import {
   buildBootstrapInjectionStats,
   buildBootstrapPromptWarning,
@@ -131,6 +132,18 @@ export function shouldSkipLocalCliCredentialEpoch(params: {
   );
 }
 
+function shouldRefreshAuthProfileForExecution(params: {
+  backendId: string;
+  authProfileId?: string;
+  authCredential?: AuthProfileCredential;
+}): boolean {
+  return Boolean(
+    params.backendId === "google-gemini-cli" &&
+    params.authProfileId &&
+    params.authCredential?.type === "oauth",
+  );
+}
+
 export async function prepareCliRunContext(
   params: RunCliAgentParams,
 ): Promise<PreparedCliRunContext> {
@@ -179,9 +192,10 @@ export async function prepareCliRunContext(
   const requestedAuthProfileId = params.authProfileId?.trim() || undefined;
   const effectiveAuthProfileId =
     requestedAuthProfileId ?? backendResolved.defaultAuthProfileId?.trim() ?? undefined;
+  let authStore: AuthProfileStore | undefined;
   let authCredential: AuthProfileCredential | undefined;
   if (effectiveAuthProfileId) {
-    const authStore = loadAuthProfileStoreForRuntime(agentDir, {
+    authStore = loadAuthProfileStoreForRuntime(agentDir, {
       readOnly: true,
       externalCli: externalCliDiscoveryForProviderAuth({
         provider: params.provider,
@@ -189,6 +203,36 @@ export async function prepareCliRunContext(
       }),
     });
     authCredential = authStore.profiles[effectiveAuthProfileId];
+  }
+  if (
+    effectiveAuthProfileId &&
+    shouldRefreshAuthProfileForExecution({
+      backendId: backendResolved.id,
+      authProfileId: effectiveAuthProfileId,
+      authCredential,
+    })
+  ) {
+    const authProfileId = effectiveAuthProfileId;
+    const writableAuthStore = loadAuthProfileStoreForRuntime(agentDir, {
+      externalCli: externalCliDiscoveryForProviderAuth({
+        provider: params.provider,
+        profileId: authProfileId,
+      }),
+    });
+    await resolveApiKeyForProfile({
+      cfg: params.config,
+      store: writableAuthStore,
+      profileId: authProfileId,
+      agentDir,
+    });
+    authStore = loadAuthProfileStoreForRuntime(agentDir, {
+      readOnly: true,
+      externalCli: externalCliDiscoveryForProviderAuth({
+        provider: params.provider,
+        profileId: authProfileId,
+      }),
+    });
+    authCredential = authStore.profiles[authProfileId];
   }
   const extraSystemPrompt = params.extraSystemPrompt?.trim() ?? "";
   // Use the static portion (excluding per-message inbound metadata) for session reuse hashing.
@@ -301,6 +345,11 @@ export async function prepareCliRunContext(
     provider: params.provider,
     modelId,
     authProfileId: effectiveAuthProfileId,
+    // Private bridge for bundled Gemini CLI. This is intentionally not part
+    // of the public Plugin SDK until a credential-forwarding contract exists.
+    authCredential,
+  } as Parameters<NonNullable<typeof backendResolved.prepareExecution>>[0] & {
+    authCredential?: AuthProfileCredential;
   });
   const skipLocalCredentialEpoch = shouldSkipLocalCliCredentialEpoch({
     authEpochMode: backendResolved.authEpochMode,
