@@ -9,6 +9,7 @@ import { FailoverError } from "../agents/failover-error.js";
 import { HISTORY_CONTEXT_MARKER } from "../auto-reply/reply/history.js";
 import { CURRENT_MESSAGE_MARKER } from "../auto-reply/reply/mentions.js";
 import { emitAgentEvent } from "../infra/agent-events.js";
+import { IMAGE_ONLY_USER_MESSAGE } from "./agent-prompt.js";
 import { buildAssistantDeltaResult } from "./test-helpers.agent-results.js";
 import {
   agentCommand,
@@ -1687,7 +1688,9 @@ describe("OpenResponses HTTP API (e2e)", () => {
     expect(res.status).toBe(200);
     expect(agentCommand).toHaveBeenCalledTimes(1);
     const opts = firstAgentOpts();
-    expect((opts as { message?: string }).message ?? "").toBe("");
+    // Image-only turn carries a non-empty placeholder so the agent command runs,
+    // with the real image attached via `images` (parity with /v1/chat/completions).
+    expect((opts as { message?: string }).message ?? "").toBe(IMAGE_ONLY_USER_MESSAGE);
     expect((opts as { images?: unknown[] }).images?.length).toBe(1);
     await ensureResponseConsumed(res);
   });
