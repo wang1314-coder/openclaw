@@ -530,6 +530,27 @@ type ExecutedToolCallBatch = {
   terminate: boolean;
 };
 
+function resolveToolTerminalResultFallback(
+  currentContext: AgentContext,
+  toolCall: AgentToolCall,
+): AgentTool["terminalResultFallback"] | undefined {
+  return currentContext.tools?.find((tool) => tool.name === toolCall.name)?.terminalResultFallback;
+}
+
+function buildToolExecutionStartEvent(
+  currentContext: AgentContext,
+  toolCall: AgentToolCall,
+): Extract<AgentEvent, { type: "tool_execution_start" }> {
+  const terminalResultFallback = resolveToolTerminalResultFallback(currentContext, toolCall);
+  return {
+    type: "tool_execution_start",
+    toolCallId: toolCall.id,
+    toolName: toolCall.name,
+    args: toolCall.arguments,
+    ...(terminalResultFallback ? { terminalResultFallback } : {}),
+  };
+}
+
 async function executeToolCallsSequential(
   currentContext: AgentContext,
   assistantMessage: AssistantMessage,
@@ -542,12 +563,7 @@ async function executeToolCallsSequential(
   const messages: ToolResultMessage[] = [];
 
   for (const toolCall of toolCalls) {
-    await emit({
-      type: "tool_execution_start",
-      toolCallId: toolCall.id,
-      toolName: toolCall.name,
-      args: toolCall.arguments,
-    });
+    await emit(buildToolExecutionStartEvent(currentContext, toolCall));
 
     const preparation = await prepareToolCall(
       currentContext,
@@ -603,12 +619,7 @@ async function executeToolCallsParallel(
   const finalizedCalls: FinalizedToolCallEntry[] = [];
 
   for (const toolCall of toolCalls) {
-    await emit({
-      type: "tool_execution_start",
-      toolCallId: toolCall.id,
-      toolName: toolCall.name,
-      args: toolCall.arguments,
-    });
+    await emit(buildToolExecutionStartEvent(currentContext, toolCall));
 
     const preparation = await prepareToolCall(
       currentContext,

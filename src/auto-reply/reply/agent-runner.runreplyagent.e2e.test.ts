@@ -1307,7 +1307,7 @@ describe("runReplyAgent typing (heartbeat)", () => {
     expect(sessionEntry.fallbackNoticeReason).toBeUndefined();
   });
 
-  it("keeps fallback transition notices when block streaming has no final text", async () => {
+  it("surfaces fallback failure when block streaming has no matching final payload", async () => {
     const sessionEntry: SessionEntry = {
       sessionId: "session",
       updatedAt: Date.now(),
@@ -1349,8 +1349,56 @@ describe("runReplyAgent typing (heartbeat)", () => {
 
       expect(onBlockReply).toHaveBeenCalled();
       expect(payloads).toHaveLength(1);
-      expect(payloads[0]?.text).toContain("Model Fallback:");
+      expect(payloads[0]?.isError).toBe(true);
+      expect(payloads[0]?.text).toContain("Fallback used deepinfra/moonshotai/Kimi-K2.5");
+      expect(payloads[0]?.text).toContain("no visible reply");
       expect(payloads[0]?.text).not.toContain("streamed answer");
+    } finally {
+      fallbackSpy.mockRestore();
+    }
+  });
+
+  it("does not surface fallback failure when block streaming delivered the final payload", async () => {
+    const sessionEntry: SessionEntry = {
+      sessionId: "session",
+      updatedAt: Date.now(),
+    };
+    const sessionStore = { main: sessionEntry };
+    const onBlockReply = vi.fn();
+
+    state.runEmbeddedAgentMock.mockImplementationOnce(async (params: AgentRunParams) => {
+      await params.onBlockReply?.({ text: "streamed final answer" });
+      return { payloads: [{ text: "streamed final answer" }], meta: {} };
+    });
+    const fallbackSpy = vi
+      .spyOn(modelFallbackModule, "runWithModelFallback")
+      .mockImplementationOnce(
+        async ({ run }: { run: (provider: string, model: string) => Promise<unknown> }) => ({
+          result: await run("deepinfra", "moonshotai/Kimi-K2.5"),
+          provider: "deepinfra",
+          model: "moonshotai/Kimi-K2.5",
+          attempts: [
+            {
+              provider: "fireworks",
+              model: "fireworks/accounts/fireworks/routers/kimi-k2p5-turbo",
+              error: "Provider fireworks is in cooldown (all profiles unavailable)",
+              reason: "rate_limit",
+            },
+          ],
+        }),
+      );
+    try {
+      const { run } = createMinimalRun({
+        blockStreamingEnabled: true,
+        opts: { onBlockReply },
+        sessionEntry,
+        sessionStore,
+        sessionKey: "main",
+      });
+      const res = await run();
+
+      expect(onBlockReply).toHaveBeenCalled();
+      expect(res).toBeUndefined();
     } finally {
       fallbackSpy.mockRestore();
     }
@@ -1410,6 +1458,60 @@ describe("runReplyAgent typing (heartbeat)", () => {
     } finally {
       fallbackSpy.mockRestore();
     }
+  });
+
+  it("preserves terminal fallback content when a terminal status payload follows", async () => {
+    state.runEmbeddedAgentMock.mockResolvedValueOnce({
+      payloads: [
+        { text: "Tool result: scheduler has no jobs." },
+        { text: "⚠️ The model timed out after the tool completed.", isError: true },
+      ],
+      meta: {},
+    });
+
+    const { run } = createMinimalRun();
+    const res = await run();
+    const payloads = Array.isArray(res) ? res : res ? [res] : [];
+
+    expect(payloads).toHaveLength(2);
+    expect(payloads[0]?.text).toBe("Tool result: scheduler has no jobs.");
+    expect(payloads[0]?.isError).not.toBe(true);
+    expect(payloads[0]?.replyToId).toBe("msg");
+    expect(payloads[1]?.text).toBe("⚠️ The model timed out after the tool completed.");
+    expect(payloads[1]?.isError).toBe(true);
+    expect(payloads[1]?.replyToId).toBe("msg");
+  });
+
+  it("returns tool-loop terminal fallback content as a visible final reply", async () => {
+    state.runEmbeddedAgentMock.mockResolvedValueOnce({
+      payloads: [
+        {
+          text: "URL: https://example.com\nStatus: 200\nTitle: Example Domain",
+        },
+      ],
+      meta: {
+        aborted: true,
+        livenessState: "blocked",
+        completion: {
+          stopReason: "tool_loop_abort",
+          finishReason: "tool_loop_abort",
+        },
+      },
+      didSendViaMessagingTool: false,
+      didSendDeterministicApprovalPrompt: false,
+      messagingToolSentTexts: [],
+      messagingToolSentMediaUrls: [],
+      messagingToolSentTargets: [],
+    });
+
+    const { run } = createMinimalRun();
+    const res = await run();
+    const payloads = Array.isArray(res) ? res : res ? [res] : [];
+
+    expect(payloads).toHaveLength(1);
+    expect(payloads[0]?.text).toBe("URL: https://example.com\nStatus: 200\nTitle: Example Domain");
+    expect(payloads[0]?.isError).not.toBe(true);
+    expect(payloads[0]?.replyToId).toBe("msg");
   });
 
   it("surfaces a configured backend failure when fallback produces no visible reply", async () => {
@@ -1504,6 +1606,187 @@ describe("runReplyAgent typing (heartbeat)", () => {
     } finally {
       fallbackSpy.mockRestore();
     }
+  });
+
+  it("surfaces side-effect progress when a runtime returns no payloads", async () => {
+    state.runEmbeddedAgentMock.mockResolvedValueOnce({
+      payloads: [],
+      successfulCronAdds: 1,
+      meta: {},
+    });
+
+    const { run } = createMinimalRun({
+      sessionCtx: {
+        Provider: "discord",
+        OriginatingChannel: "discord",
+        MessageSid: "1503645939964055592",
+      },
+    });
+    const res = await run();
+    const payload = Array.isArray(res) ? res[0] : res;
+
+    expect(payload?.isError).not.toBe(true);
+    expect(payload?.text).toBe(
+      "A scheduled task was created, but the agent did not provide a final response.",
+    );
+  });
+
+  it("surfaces side-effect progress when NO_REPLY is stripped from a runtime result", async () => {
+    state.runEmbeddedAgentMock.mockResolvedValueOnce({
+      payloads: [{ text: "NO_REPLY" }],
+      successfulCronAdds: 2,
+      meta: {},
+    });
+
+    const { run } = createMinimalRun({
+      sessionCtx: {
+        Provider: "discord",
+        OriginatingChannel: "discord",
+        MessageSid: "1503645939964055592",
+      },
+    });
+    const res = await run();
+    const payload = Array.isArray(res) ? res[0] : res;
+
+    expect(payload?.isError).not.toBe(true);
+    expect(payload?.text).toBe(
+      "2 scheduled tasks were created, but the agent did not provide a final response.",
+    );
+  });
+
+  it("surfaces generic side-effect progress when a non-cron runtime returns no payloads", async () => {
+    state.runEmbeddedAgentMock.mockResolvedValueOnce({
+      payloads: [],
+      didSendViaMessagingTool: true,
+      messagingToolSentTargets: [{ tool: "message", provider: "discord", to: "channel:elsewhere" }],
+      meta: {},
+    });
+
+    const { run } = createMinimalRun({
+      sessionCtx: {
+        Provider: "discord",
+        OriginatingChannel: "discord",
+        MessageSid: "1503645939964055592",
+      },
+    });
+    const res = await run();
+    const payload = Array.isArray(res) ? res[0] : res;
+
+    expect(payload?.isError).not.toBe(true);
+    expect(payload?.text).toBe(
+      "An external action completed, but the agent did not provide a final response.",
+    );
+  });
+
+  it("does not report completed side-effect progress for an attempted message send", async () => {
+    state.runEmbeddedAgentMock.mockResolvedValueOnce({
+      payloads: [],
+      didSendViaMessagingTool: true,
+      meta: {},
+    });
+
+    const { run } = createMinimalRun({
+      sessionCtx: {
+        Provider: "discord",
+        OriginatingChannel: "discord",
+        MessageSid: "1503645939964055592",
+      },
+    });
+
+    await expect(run()).resolves.toBeUndefined();
+  });
+
+  it("does not add a terminal acknowledgement when side-effect progress was visibly delivered", async () => {
+    state.runEmbeddedAgentMock.mockResolvedValueOnce({
+      payloads: [{ text: "NO_REPLY" }],
+      didSendViaMessagingTool: true,
+      messagingToolSentTexts: ["already sent"],
+      messagingToolSentTargets: [
+        { tool: "message", provider: "discord", to: "channel:C1", text: "already sent" },
+      ],
+      meta: {},
+    });
+
+    const { run } = createMinimalRun({
+      sessionCtx: {
+        Provider: "discord",
+        OriginatingChannel: "discord",
+        OriginatingTo: "channel:C1",
+        MessageSid: "1503645939964055592",
+      },
+    });
+
+    await expect(run()).resolves.toBeUndefined();
+  });
+
+  it.each([
+    {
+      name: "presentation",
+      target: {
+        tool: "message",
+        provider: "discord",
+        to: "channel:C1",
+        presentation: { title: "Deployment ready", blocks: [] },
+      },
+    },
+    {
+      name: "interactive",
+      target: {
+        tool: "message",
+        provider: "discord",
+        to: "channel:C1",
+        interactive: { blocks: [{ type: "button", label: "Open", value: "open" }] },
+      },
+    },
+    {
+      name: "channelData",
+      target: {
+        tool: "message",
+        provider: "discord",
+        to: "channel:C1",
+        channelData: { embeds: [{ title: "Deployment ready" }] },
+      },
+    },
+  ])(
+    "does not add a terminal acknowledgement when rich $name side-effect progress was visibly delivered",
+    async ({ target }) => {
+      state.runEmbeddedAgentMock.mockResolvedValueOnce({
+        payloads: [{ text: "NO_REPLY" }],
+        didSendViaMessagingTool: true,
+        messagingToolSentTargets: [target],
+        meta: {},
+      });
+
+      const { run } = createMinimalRun({
+        sessionCtx: {
+          Provider: "discord",
+          OriginatingChannel: "discord",
+          OriginatingTo: "channel:C1",
+          MessageSid: "1503645939964055592",
+        },
+      });
+
+      await expect(run()).resolves.toBeUndefined();
+    },
+  );
+
+  it("keeps explicit silent turns silent after side-effect progress", async () => {
+    state.runEmbeddedAgentMock.mockResolvedValueOnce({
+      payloads: [{ text: "NO_REPLY" }],
+      successfulCronAdds: 1,
+      meta: {},
+    });
+
+    const { run } = createMinimalRun({
+      runOverrides: { silentExpected: true },
+      sessionCtx: {
+        Provider: "discord",
+        OriginatingChannel: "discord",
+        MessageSid: "1503645939964055592",
+      },
+    });
+
+    await expect(run()).resolves.toBeUndefined();
   });
 
   it("surfaces a persisted configured backend failure when the active fallback is silent", async () => {
@@ -1701,7 +1984,7 @@ describe("runReplyAgent typing (heartbeat)", () => {
     }
   });
 
-  it("announces fallback without silence failure when fallback committed target-only messaging delivery", async () => {
+  it("announces fallback with silence failure when fallback only recorded a message target", async () => {
     state.runEmbeddedAgentMock.mockResolvedValueOnce({
       payloads: [{ text: "NO_REPLY" }],
       messagingToolSentTargets: [{ tool: "message", provider: "discord", to: "channel:C1" }],
@@ -1744,9 +2027,10 @@ describe("runReplyAgent typing (heartbeat)", () => {
       const res = await run();
       const payload = Array.isArray(res) ? res[0] : res;
 
-      expect(payload?.isError).not.toBe(true);
-      expect(payload?.text).toContain("Model Fallback:");
-      expect(payload?.text).not.toContain("no visible reply");
+      expect(payload?.isError).toBe(true);
+      expect(payload?.text).toContain("configured model backend lmstudio/gemma-4-e4b-it");
+      expect(payload?.text).toContain("Fallback used openai/gpt-5.5");
+      expect(payload?.text).toContain("no visible reply");
     } finally {
       fallbackSpy.mockRestore();
     }

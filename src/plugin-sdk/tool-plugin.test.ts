@@ -1,10 +1,7 @@
-/**
- * Tests tool plugin schema helpers and SDK tool registration contracts.
- */
 import { Type } from "typebox";
 import { describe, expect, expectTypeOf, it, vi } from "vitest";
 import { createCapturedPluginRegistration } from "../plugins/captured-registration.js";
-import { defineToolPlugin, getToolPluginMetadata } from "./tool-plugin.js";
+import { defineToolPlugin, getToolPluginMetadata, toolResult } from "./tool-plugin.js";
 
 describe("defineToolPlugin", () => {
   it("registers declared tools and wraps plain object results", async () => {
@@ -74,6 +71,275 @@ describe("defineToolPlugin", () => {
     expect(result).toEqual({
       content: [{ type: "text", text: "hello" }],
       details: "hello",
+    });
+  });
+
+  it("preserves agent tool results with terminal summaries", async () => {
+    const entry = defineToolPlugin({
+      id: "status",
+      name: "Status",
+      description: "Status tool.",
+      tools: (tool) => [
+        tool({
+          name: "status",
+          description: "Return status.",
+          parameters: Type.Object({}),
+          execute: () =>
+            toolResult({
+              content: [{ type: "text", text: "healthy" }],
+              details: { ok: true },
+              terminalSummary: {
+                privacy: "public",
+                text: "Status: healthy",
+              },
+            }),
+        }),
+      ],
+    });
+    const captured = createCapturedPluginRegistration({ id: "status" });
+
+    entry.register(captured.api);
+
+    const result = await captured.tools[0].execute("call-1", {});
+    expect(result).toEqual({
+      content: [{ type: "text", text: "healthy" }],
+      details: { ok: true },
+      terminalSummary: {
+        privacy: "public",
+        text: "Status: healthy",
+      },
+    });
+  });
+
+  it("wraps bare terminal-summary-shaped JSON instead of treating it as a tool result", async () => {
+    const entry = defineToolPlugin({
+      id: "terminal-summary-json",
+      name: "Terminal Summary JSON",
+      description: "Terminal summary JSON tool.",
+      tools: (tool) => [
+        tool({
+          name: "terminal_summary_json",
+          description: "Return terminal-summary-shaped JSON.",
+          parameters: Type.Object({}),
+          execute: () => ({
+            content: [{ type: "text", text: "ordinary payload" }],
+            details: { status: "ok" },
+            terminalSummary: {
+              privacy: "public",
+              text: "Status: healthy",
+            },
+          }),
+        }),
+      ],
+    });
+    const captured = createCapturedPluginRegistration({ id: "terminal-summary-json" });
+
+    entry.register(captured.api);
+
+    const payload = {
+      content: [{ type: "text", text: "ordinary payload" }],
+      details: { status: "ok" },
+      terminalSummary: {
+        privacy: "public",
+        text: "Status: healthy",
+      },
+    };
+    const result = await captured.tools[0].execute("call-1", {});
+    expect(result.details).toEqual(payload);
+    expect(result.content).toEqual([
+      {
+        type: "text",
+        text: JSON.stringify(payload, null, 2),
+      },
+    ]);
+  });
+
+  it("preserves text-only agent tool results with structured details", async () => {
+    const entry = defineToolPlugin({
+      id: "text-result",
+      name: "Text Result",
+      description: "Text result tool.",
+      tools: (tool) => [
+        tool({
+          name: "text_result",
+          description: "Return a text result.",
+          parameters: Type.Object({}),
+          execute: () =>
+            toolResult({
+              content: [{ type: "text", text: "ready" }],
+              details: { status: "ok" },
+            }),
+        }),
+      ],
+    });
+    const captured = createCapturedPluginRegistration({ id: "text-result" });
+
+    entry.register(captured.api);
+
+    const result = await captured.tools[0].execute("call-1", {});
+    expect(result).toEqual({
+      content: [{ type: "text", text: "ready" }],
+      details: { status: "ok" },
+    });
+  });
+
+  it("wraps bare text-shaped JSON with content and details fields", async () => {
+    const entry = defineToolPlugin({
+      id: "bare-result-json",
+      name: "Bare Result JSON",
+      description: "Bare result JSON tool.",
+      tools: (tool) => [
+        tool({
+          name: "bare_result_json",
+          description: "Return bare result-shaped JSON.",
+          parameters: Type.Object({}),
+          execute: () => ({
+            content: [{ type: "text", text: "ordinary payload" }],
+            details: { status: "ok" },
+          }),
+        }),
+      ],
+    });
+    const captured = createCapturedPluginRegistration({ id: "bare-result-json" });
+
+    entry.register(captured.api);
+
+    const payload = {
+      content: [{ type: "text", text: "ordinary payload" }],
+      details: { status: "ok" },
+    };
+    const result = await captured.tools[0].execute("call-1", {});
+    expect(result.details).toEqual(payload);
+    expect(result.content).toEqual([
+      {
+        type: "text",
+        text: JSON.stringify(payload, null, 2),
+      },
+    ]);
+  });
+
+  it("wraps plain JSON objects with content fields instead of treating them as tool results", async () => {
+    const entry = defineToolPlugin({
+      id: "content-json",
+      name: "Content JSON",
+      description: "Content JSON tool.",
+      tools: (tool) => [
+        tool({
+          name: "content_json",
+          description: "Return JSON with a content field.",
+          parameters: Type.Object({}),
+          execute: () => ({ content: [], status: "ok" }),
+        }),
+      ],
+    });
+    const captured = createCapturedPluginRegistration({ id: "content-json" });
+
+    entry.register(captured.api);
+
+    const result = await captured.tools[0].execute("call-1", {});
+    expect(result.details).toEqual({ content: [], status: "ok" });
+    expect(result.content).toEqual([
+      {
+        type: "text",
+        text: JSON.stringify({ content: [], status: "ok" }, null, 2),
+      },
+    ]);
+  });
+
+  it("wraps text-shaped JSON objects with content and details fields", async () => {
+    const entry = defineToolPlugin({
+      id: "result-shaped-json",
+      name: "Result-shaped JSON",
+      description: "Result-shaped JSON tool.",
+      tools: (tool) => [
+        tool({
+          name: "result_shaped_json",
+          description: "Return JSON with result-like fields.",
+          parameters: Type.Object({}),
+          execute: () => ({
+            id: "payload-1",
+            content: [{ type: "text", text: "ordinary payload" }],
+            details: { status: "ok" },
+          }),
+        }),
+      ],
+    });
+    const captured = createCapturedPluginRegistration({ id: "result-shaped-json" });
+
+    entry.register(captured.api);
+
+    const result = await captured.tools[0].execute("call-1", {});
+    expect(result.details).toEqual({
+      id: "payload-1",
+      content: [{ type: "text", text: "ordinary payload" }],
+      details: { status: "ok" },
+    });
+    expect(result.content).toEqual([
+      {
+        type: "text",
+        text: JSON.stringify(
+          {
+            id: "payload-1",
+            content: [{ type: "text", text: "ordinary payload" }],
+            details: { status: "ok" },
+          },
+          null,
+          2,
+        ),
+      },
+    ]);
+  });
+
+  it("preserves agent tool results with non-text content blocks", async () => {
+    const entry = defineToolPlugin({
+      id: "image-result",
+      name: "Image Result",
+      description: "Image result tool.",
+      tools: (tool) => [
+        tool({
+          name: "image_result",
+          description: "Return an image block.",
+          parameters: Type.Object({}),
+          execute: () => ({
+            content: [{ type: "image", data: "base64-image", mimeType: "image/png" }],
+            details: { status: "ok" },
+          }),
+        }),
+      ],
+    });
+    const captured = createCapturedPluginRegistration({ id: "image-result" });
+
+    entry.register(captured.api);
+
+    const result = await captured.tools[0].execute("call-1", {});
+    expect(result).toEqual({
+      content: [{ type: "image", data: "base64-image", mimeType: "image/png" }],
+      details: { status: "ok" },
+    });
+  });
+
+  it("passes simple-tool terminal fallback metadata to runtime registration", () => {
+    const entry = defineToolPlugin({
+      id: "fallback-tools",
+      name: "Fallback Tools",
+      description: "Fallback tool demo.",
+      tools: (tool) => [
+        tool({
+          name: "fallback_status",
+          description: "Return status.",
+          parameters: Type.Object({}),
+          terminalResultFallback: { mode: "safe_text", prefix: "Status:" },
+          execute: () => "healthy",
+        }),
+      ],
+    });
+    const captured = createCapturedPluginRegistration({ id: "fallback-tools" });
+
+    entry.register(captured.api);
+
+    expect(captured.tools[0]).toMatchObject({
+      name: "fallback_status",
+      terminalResultFallback: { mode: "safe_text", prefix: "Status:" },
     });
   });
 
