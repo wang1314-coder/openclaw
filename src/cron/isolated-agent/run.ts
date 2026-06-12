@@ -93,6 +93,7 @@ import {
   setSessionRuntimeModel,
 } from "./run.runtime.js";
 import type { RunCronAgentTurnResult } from "./run.types.js";
+import { cleanupCronRunSessionAfterRun } from "./session-cleanup.js";
 import { resolveCronAgentSessionKey } from "./session-key.js";
 import { resolveCronSession } from "./session.js";
 
@@ -1400,13 +1401,22 @@ export async function runCronIsolatedAgentTurn(params: {
       ...finalSessionRef,
       error: outcomeError,
     });
-    // Release runtime references after the run completes (success or failure).
-    // The session entry has already been persisted to disk by this point,
-    // so the in-memory store and run context can be safely dropped.
-    await disposeCronRunContext({
-      sessionId: initialSessionId,
-      cronSession: prepared.context.cronSession,
-      ownsRunContext: params.job.sessionTarget === "isolated",
-    });
+    try {
+      await cleanupCronRunSessionAfterRun({
+        job: params.job,
+        agentSessionKey: prepared.context.agentSessionKey,
+        sessionId: prepared.context.currentRunSessionId(),
+        reason: "cron-delete-after-run-finally",
+      });
+    } finally {
+      // Release runtime references after the run completes (success or failure).
+      // The session entry has already been persisted to disk by this point,
+      // so the in-memory store and run context can be safely dropped.
+      await disposeCronRunContext({
+        sessionId: initialSessionId,
+        cronSession: prepared.context.cronSession,
+        ownsRunContext: params.job.sessionTarget === "isolated",
+      });
+    }
   }
 }
