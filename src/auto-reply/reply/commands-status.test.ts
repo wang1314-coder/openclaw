@@ -38,6 +38,20 @@ const providerUsageMock = vi.hoisted(() => ({
     providers: [],
   })),
 }));
+type StatusPluginHealthSnapshot =
+  import("../../status/status-plugin-health.js").StatusPluginHealthSnapshot;
+
+const pluginHealthRuntimeMock = vi.hoisted(() => ({
+  collectRuntimePluginHealthSnapshot: vi.fn(
+    (): StatusPluginHealthSnapshot => ({
+      plugins: [],
+      diagnostics: [],
+      contextEngineQuarantines: [],
+      runtimeToolQuarantines: [],
+      channelPluginFailures: [],
+    }),
+  ),
+}));
 
 vi.mock("../../infra/provider-usage.js", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../../infra/provider-usage.js")>();
@@ -46,6 +60,8 @@ vi.mock("../../infra/provider-usage.js", async (importOriginal) => {
     loadProviderUsageSummary: providerUsageMock.loadProviderUsageSummary,
   };
 });
+
+vi.mock("../../status/status-plugin-health.runtime.js", () => pluginHealthRuntimeMock);
 
 vi.mock("../../agents/harness/builtin-openclaw.js", () => ({
   createOpenClawAgentHarness: () => ({
@@ -171,6 +187,14 @@ afterEach(() => {
   providerUsageMock.loadProviderUsageSummary.mockResolvedValue({
     updatedAt: Date.now(),
     providers: [],
+  });
+  pluginHealthRuntimeMock.collectRuntimePluginHealthSnapshot.mockReset();
+  pluginHealthRuntimeMock.collectRuntimePluginHealthSnapshot.mockReturnValue({
+    plugins: [],
+    diagnostics: [],
+    contextEngineQuarantines: [],
+    runtimeToolQuarantines: [],
+    channelPluginFailures: [],
   });
 });
 
@@ -633,6 +657,52 @@ describe("buildStatusReply subagent summary", () => {
     });
 
     expect(normalizeTestText(text)).toContain("Uptime: gateway 2h 5m · system 4d 3h");
+  });
+
+  it("renders compact plugin health from the runtime snapshot", async () => {
+    pluginHealthRuntimeMock.collectRuntimePluginHealthSnapshot.mockReturnValue({
+      plugins: [],
+      diagnostics: [],
+      contextEngineQuarantines: [],
+      runtimeToolQuarantines: [],
+      channelPluginFailures: [
+        {
+          channelId: "broken",
+          message: "failed to load setup entry: boom",
+          source: "diagnostic",
+        },
+      ],
+    });
+
+    const text = await buildStatusText({
+      cfg: baseCfg,
+      sessionEntry: {
+        sessionId: "sess-status-plugin-health",
+        updatedAt: 0,
+        contextTokens: 32_000,
+      },
+      sessionKey: "agent:main:main",
+      parentSessionKey: "agent:main:main",
+      sessionScope: "per-sender",
+      statusChannel: "mobilechat",
+      workspaceDir: "/tmp/status-plugin-health-workspace",
+      provider: "anthropic",
+      model: "claude-opus-4-5",
+      contextTokens: 32_000,
+      resolvedFastMode: false,
+      resolvedVerboseLevel: "off",
+      resolvedReasoningLevel: "off",
+      resolveDefaultThinkingLevel: async () => undefined,
+      isGroup: false,
+      defaultGroupActivation: () => "mention",
+      modelAuthOverride: "api-key",
+      activeModelAuthOverride: "api-key",
+    });
+
+    // Compact status reads only the runtime snapshot; no config-driven
+    // channel inspection happens on this path.
+    expect(pluginHealthRuntimeMock.collectRuntimePluginHealthSnapshot).toHaveBeenCalledWith();
+    expect(normalizeTestText(text)).toContain("Plugins: 1 channel plugin failure");
   });
 
   it("shows the effective non-OpenClaw embedded harness in /status", async () => {
