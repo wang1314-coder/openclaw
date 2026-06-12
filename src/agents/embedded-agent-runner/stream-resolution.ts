@@ -52,6 +52,10 @@ function hasResolvedRuntimeApiKey(apiKey: string | undefined): boolean {
   return typeof apiKey === "string" && apiKey.trim().length > 0;
 }
 
+function requiresOpenClawToolWireShape(model: EmbeddedRunAttemptParams["model"]): boolean {
+  return model.api === "anthropic-messages";
+}
+
 function isOpenAICodexResponsesModel(model: EmbeddedRunAttemptParams["model"]): boolean {
   return model.provider === "openai" && model.api === "openai-chatgpt-responses";
 }
@@ -95,7 +99,8 @@ export function describeEmbeddedAgentStreamStrategy(params: {
       : "stream-simple";
   }
   if (
-    hasResolvedRuntimeApiKey(params.resolvedApiKey) &&
+    (hasResolvedRuntimeApiKey(params.resolvedApiKey) ||
+      requiresOpenClawToolWireShape(params.model)) &&
     createBoundaryAwareStreamFnForModel(params.model)
   ) {
     return `boundary-aware:${params.model.api}`;
@@ -174,7 +179,8 @@ export function resolveEmbeddedAgentStreamFn(params: {
 
   if (
     isDefaultOpenClawStreamFnForModel(params.model, params.currentStreamFn) ||
-    hasResolvedRuntimeApiKey(params.resolvedApiKey)
+    hasResolvedRuntimeApiKey(params.resolvedApiKey) ||
+    requiresOpenClawToolWireShape(params.model)
   ) {
     const boundaryAwareStreamFn = createBoundaryAwareStreamFnForModel(params.model);
     if (boundaryAwareStreamFn) {
