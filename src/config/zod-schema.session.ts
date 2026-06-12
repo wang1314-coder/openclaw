@@ -157,6 +157,7 @@ export const MessagesSchema = z
   .object({
     messagePrefix: z.string().optional(),
     visibleReplies: VisibleRepliesSchema.optional(),
+    strandedReplyRecovery: z.boolean().optional(),
     responsePrefix: z.string().optional(),
     groupChat: GroupChatSchema,
     queue: QueueSchema,
