@@ -3268,6 +3268,14 @@ export const chatHandlers: GatewayRequestHandlers = {
         payload: { runId: clientRunId },
       });
     }
+    let activeChatRunRemoved = false;
+    const removeActiveChatRun = () => {
+      if (activeChatRunRemoved) {
+        return;
+      }
+      activeChatRunRemoved = true;
+      context.removeChatRun(clientRunId, clientRunId, sessionKey);
+    };
     const explicitOriginTargetsPlugin = explicitOriginTargetsPluginBinding(
       explicitOriginResult.value,
     );
@@ -4475,16 +4483,51 @@ export const chatHandlers: GatewayRequestHandlers = {
           );
         })
         .catch(async (err: unknown) => {
-          const emitAfterError =
-            userTurnRecorder.hasPersisted() || userTurnRecorder.isBlocked()
-              ? Promise.resolve()
-              : persistGatewayUserTurnTranscript();
-          await emitAfterError.catch((transcriptErr: unknown) => {
+          const abortedAtDispatchReject = activeRunAbort.controller.signal.aborted;
+          const abortStopReasonAtDispatchReject = activeRunAbort.entry?.abortStopReason ?? "rpc";
+          const persistErrorTranscript = async () => {
+            const emitAfterError =
+              userTurnRecorder.hasPersisted() || userTurnRecorder.isBlocked()
+                ? Promise.resolve()
+                : persistGatewayUserTurnTranscript();
+            await emitAfterError.catch((transcriptErr: unknown) => {
+              context.logGateway.warn(
+                `webchat user transcript update failed after error: ${formatForLog(transcriptErr)}`,
+              );
+            });
+          };
+          if (abortedAtDispatchReject) {
+            await persistErrorTranscript();
+            // Dispatch rejected after chat.abort already broadcast the terminal
+            // abort. Preserve that outcome instead of resurrecting the run as an error.
+            const stopReason = abortStopReasonAtDispatchReject;
+            const endedAt = Date.now();
+            const payload = buildAbortedChatSendPayload({
+              runId: clientRunId,
+              stopReason,
+              endedAt,
+            });
             context.logGateway.warn(
-              `webchat user transcript update failed after error: ${formatForLog(transcriptErr)}`,
+              `chat.send post-dispatch threw after abort for runId=${clientRunId}: ${formatForLog(err)}`,
             );
-          });
-          const error = errorShape(ErrorCodes.UNAVAILABLE, String(err));
+            setGatewayDedupeEntry({
+              dedupe: context.dedupe,
+              key: `chat:${clientRunId}`,
+              entry: {
+                ts: endedAt,
+                ok: true,
+                payload,
+              },
+            });
+            return;
+          }
+          // Dispatch has already rejected, so the error owns the terminal state.
+          // Close the abort/retry window before any awaited transcript fallback.
+          context.chatAbortedRuns.delete(clientRunId);
+          activeRunAbort.cleanup();
+          removeActiveChatRun();
+          const errorMessage = String(err);
+          const error = errorShape(ErrorCodes.UNAVAILABLE, errorMessage);
           setGatewayDedupeEntry({
             dedupe: context.dedupe,
             key: `chat:${clientRunId}`,
@@ -4494,28 +4537,29 @@ export const chatHandlers: GatewayRequestHandlers = {
               payload: {
                 runId: clientRunId,
                 status: "error" as const,
-                summary: String(err),
+                summary: errorMessage,
               },
               error,
             },
           });
+          await persistErrorTranscript();
           broadcastChatError({
             context,
             runId: clientRunId,
             sessionKey,
             agentId,
-            errorMessage: String(err),
+            errorMessage,
           });
         })
         .finally(() => {
           activeRunAbort.cleanup();
           clearActiveChatSendDedupeRun(context.dedupe, activeChatSendDedupeKey, clientRunId);
-          context.removeChatRun(clientRunId, clientRunId, sessionKey);
+          removeActiveChatRun();
         });
     } catch (err) {
       activeRunAbort.cleanup();
       clearActiveChatSendDedupeRun(context.dedupe, activeChatSendDedupeKey, clientRunId);
-      context.removeChatRun(clientRunId, clientRunId, sessionKey);
+      removeActiveChatRun();
       const error = errorShape(ErrorCodes.UNAVAILABLE, String(err));
       const payload = {
         runId: clientRunId,
