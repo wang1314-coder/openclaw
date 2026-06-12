@@ -1488,6 +1488,7 @@ export async function runEmbeddedAttempt(
           sessionKey: params.sessionKey,
           workspaceDir: effectiveWorkspace,
           cfg: params.config,
+          agentId: sessionAgentId,
         })
       : undefined;
     bundleMcpRuntime = bundleMcpSessionRuntime
@@ -2094,6 +2095,7 @@ export async function runEmbeddedAttempt(
         cwd: effectiveCwd,
         agentDir,
         cfg: params.config,
+        agentId: sessionAgentId,
         pluginMetadataSnapshot: getCurrentAttemptPluginMetadataSnapshot(),
         contextTokenBudget: params.contextTokenBudget,
       });
