@@ -7,9 +7,10 @@ import {
   isSubagentSessionKey,
   parseAgentSessionKey,
 } from "../../sessions/session-key-utils.js";
+import { readWorkspaceSkillFile } from "../lifecycle/workspace-skill-write.js";
 import { resolveSkillWorkshopConfig } from "../workshop/config.js";
 import { listSkillProposals, proposeCreateSkill, proposeUpdateSkill } from "../workshop/service.js";
-import { readWorkspaceSkillFile, resolveSkillProposalTarget } from "../workshop/store.js";
+import { resolveSkillProposalTarget } from "../workshop/store.js";
 import { extractDurableInstructionProposal } from "./signals.js";
 
 type SkillResearchAgentEndEvent = {
