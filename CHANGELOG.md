@@ -13,6 +13,10 @@ Docs: https://docs.openclaw.ai
 - Control UI startup and first-reply latency are lower through cached model metadata, removal of the startup catalog wait, lazy slash-command loading, and first-event tracing with slow-reply diagnostics. (#91531, #91538, #91568, #91583, #91598)
 - Provider support expands with OpenRouter OAuth onboarding and Claude Fable 5 adaptive thinking, while Codex sessions keep correct compaction ownership, local models skip guardian review, dynamic tool progress normalizes cleanly, and Gemma 4 reasoning replay is preserved. (#91830, #91882, #91590, #88630, #88768, #91696) Thanks @Patrick-Erichsen, @joshavant, @bdjben, and @Coder-Wangyankun.
 
+### Fixes
+
+- Feishu: fix topic session splitting for both native `topic_group` and normal groups using topic message format. Hydrate now queries the replied-to message (`rootId`) instead of the newly sent message, expands the hydrate condition to cover `chat_type="group"` groups with Feishu topic messaging, and suppresses stale `rootId` after successful hydration so the canonical `omt_*` topic ID is used consistently. Refs #78262. Thanks @joeyzenghuan.
+
 ### Changes
 
 - CLI progress: emit Claude CLI commentary progress events and bridge inter-tool commentary into channel progress without exposing internal protocol scaffolding. (#89834, #90883) Thanks @anagnorisis2peripeteia.
