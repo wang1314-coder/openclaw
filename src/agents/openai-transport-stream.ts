@@ -1849,12 +1849,18 @@ function buildOpenAISdkClientOptions(model: Model): { timeout?: number } {
 function buildOpenAISdkRequestOptions(
   model: Model,
   signal?: AbortSignal,
-): { signal?: AbortSignal; timeout?: number } | undefined {
+  options?: { stream?: boolean },
+): { signal?: AbortSignal; timeout?: number; headers?: Record<string, string> } | undefined {
   const timeout = resolveOpenAISdkTimeoutMs(model);
-  if (timeout === undefined && !signal) {
+  const headers =
+    options?.stream === true && usesNativeOpenAICodexResponsesBackend(model)
+      ? { Accept: "text/event-stream" }
+      : undefined;
+  if (timeout === undefined && !signal && !headers) {
     return undefined;
   }
   return {
+    ...(headers ? { headers } : {}),
     ...(signal ? { signal } : {}),
     ...(timeout !== undefined ? { timeout } : {}),
   };
@@ -1941,7 +1947,9 @@ export function createOpenAIResponsesTransportStreamFn(): StreamFn {
           assertCodeModeResponsesToolSurface(params);
         }
         const requestStartedAt = Date.now();
-        const requestOptions = buildOpenAISdkRequestOptions(model, options?.signal);
+        const requestOptions = buildOpenAISdkRequestOptions(model, options?.signal, {
+          stream: true,
+        });
         emitModelTransportDebug(
           log,
           `[responses] start provider=${model.provider} api=${model.api} model=${model.id} ` +
@@ -2081,7 +2089,7 @@ function isNativeOpenAICodexResponsesBaseUrl(baseUrl?: string): boolean {
   }
   try {
     const url = new URL(trimmed);
-    if (url.protocol !== "http:" && url.protocol !== "https:") {
+    if (url.protocol !== "https:") {
       return false;
     }
     if (url.hostname.toLowerCase() !== "chatgpt.com") {
