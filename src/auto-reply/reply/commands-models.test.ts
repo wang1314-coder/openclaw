@@ -3,6 +3,10 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vite
 import { testing as cliBackendsTesting } from "../../agents/cli-backends.js";
 import type { ChannelPlugin } from "../../channels/plugins/types.js";
 import type { OpenClawConfig } from "../../config/types.openclaw.js";
+import {
+  clearRuntimeConfigSnapshot,
+  setRuntimeConfigSnapshot,
+} from "../../config/runtime-snapshot.js";
 import { setActivePluginRegistry } from "../../plugins/runtime.js";
 import {
   createChannelTestPluginBase,
@@ -205,6 +209,7 @@ beforeEach(() => {
 
 afterEach(() => {
   cliBackendsTesting.resetDepsForTest();
+  clearRuntimeConfigSnapshot();
 });
 
 function buildParams(
@@ -299,6 +304,48 @@ describe("handleModelsCommand", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it("keeps provider-menu replies from forcing runtime-choice construction", async () => {
+    cliBackendsTesting.setDepsForTest({
+      resolvePluginSetupRegistry: () => ({
+        providers: [],
+        cliBackends: [],
+        configMigrations: [],
+        autoEnableProbes: [],
+        diagnostics: [],
+      }),
+      resolveRuntimeCliBackends: () => {
+        throw new Error("runtime choices should stay lazy for provider menus");
+      },
+    });
+
+    const result = await handleModelsCommand(buildParams("/models"), true);
+
+    expect(result?.shouldContinue).toBe(false);
+    expect(result?.reply?.text).toContain("Providers:");
+    expect(result?.reply?.text).toContain("- anthropic (2)");
+  });
+
+  it("keeps /models list provider-menu replies from forcing runtime-choice construction", async () => {
+    cliBackendsTesting.setDepsForTest({
+      resolvePluginSetupRegistry: () => ({
+        providers: [],
+        cliBackends: [],
+        configMigrations: [],
+        autoEnableProbes: [],
+        diagnostics: [],
+      }),
+      resolveRuntimeCliBackends: () => {
+        throw new Error("runtime choices should stay lazy for provider menus");
+      },
+    });
+
+    const result = await handleModelsCommand(buildParams("/models list"), true);
+
+    expect(result?.shouldContinue).toBe(false);
+    expect(result?.reply?.text).toContain("Providers:");
+    expect(result?.reply?.text).toContain("- anthropic (2)");
   });
 
   it("keeps explicit all browse on the full catalog path", async () => {
@@ -931,6 +978,23 @@ it("misses the cache when runtime config fingerprint changes", async () => {
 
   await buildModelsProviderData(cfgA);
   await buildModelsProviderData(cfgB);
+
+  expect(modelCatalogMocks.loadModelCatalog).toHaveBeenCalledTimes(2);
+});
+
+it("misses the cache when the runtime snapshot revision changes for the same config object", async () => {
+  const cfg = {
+    agents: {
+      defaults: {
+        model: { primary: "anthropic/claude-opus-4-5" },
+      },
+    },
+  } as OpenClawConfig;
+
+  setRuntimeConfigSnapshot(cfg);
+  await buildModelsProviderData(cfg);
+  setRuntimeConfigSnapshot(cfg);
+  await buildModelsProviderData(cfg);
 
   expect(modelCatalogMocks.loadModelCatalog).toHaveBeenCalledTimes(2);
 });

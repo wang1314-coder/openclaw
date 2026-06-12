@@ -68,6 +68,22 @@ describe("loadModelCatalogForBrowse", () => {
     expect(loadCatalog).toHaveBeenCalledExactlyOnceWith({ readOnly: false });
   });
 
+  it("keeps --all on the full catalog after a read-only browse load", async () => {
+    const loadCatalog = vi.fn(async ({ readOnly }: { readOnly: boolean }) =>
+      readOnly ? readOnlyCatalog : fullCatalog,
+    );
+
+    await expect(loadModelCatalogForBrowse({ cfg: config(), loadCatalog })).resolves.toBe(
+      readOnlyCatalog,
+    );
+    await expect(
+      loadModelCatalogForBrowse({ cfg: config(), view: "all", loadCatalog }),
+    ).resolves.toBe(fullCatalog);
+
+    expect(loadCatalog).toHaveBeenNthCalledWith(1, { readOnly: true });
+    expect(loadCatalog).toHaveBeenNthCalledWith(2, { readOnly: false });
+  });
+
   it("uses the read-only catalog when configured visibility has provider wildcards", async () => {
     const loadCatalog = vi.fn(async ({ readOnly }: { readOnly: boolean }) =>
       readOnly ? readOnlyCatalog : fullCatalog,

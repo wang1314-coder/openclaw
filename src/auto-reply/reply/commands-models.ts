@@ -53,6 +53,10 @@ type ModelsProviderDataCacheEntry = {
   promise: Promise<ModelsProviderData>;
 };
 
+type ModelsProviderDataMode = "full" | "menu";
+
+const RETIRED_BROWSE_PROVIDERS = new Set(["codex", "codex-cli"]);
+
 export type ModelsProviderData = {
   byProvider: Map<string, Set<string>>;
   providers: string[];
@@ -88,6 +92,10 @@ function isModelsBrowseVisibleProvider(provider: string): boolean {
     isCliRuntimeProvider(normalized, { includeSetupRegistry: true }) ||
     isModelPickerVisibleProvider(normalized)
   );
+}
+
+function isMenuVisibleProvider(provider: string): boolean {
+  return !RETIRED_BROWSE_PROVIDERS.has(normalizeProviderId(provider));
 }
 
 function usesUnfilteredCatalogModels(provider: string): boolean {
@@ -151,6 +159,62 @@ function addRuntimeChoice(
   return choices;
 }
 
+function buildModelsProviderModelNames(params: {
+  catalog: ReadonlyArray<{ provider: string; id: string; name?: string }>;
+  visibleCatalog: ReadonlyArray<{ provider: string; id: string; name?: string }>;
+}): Map<string, string> {
+  const modelNames = new Map<string, string>();
+  for (const entry of [...params.catalog, ...params.visibleCatalog]) {
+    if (entry.name && entry.name !== entry.id) {
+      modelNames.set(`${normalizeProviderId(entry.provider)}/${entry.id}`, entry.name);
+    }
+  }
+  return modelNames;
+}
+
+function buildModelsProviderRuntimeChoices(params: {
+  cfg: OpenClawConfig;
+  agentId?: string;
+  resolvedDefault: { provider: string; model: string };
+}): Map<string, ModelsRuntimeChoice[]> {
+  const runtimeChoicesByProvider = new Map<string, ModelsRuntimeChoice[]>();
+  const runtimeBindings = [
+    { provider: "openai", runtime: "codex", cli: false },
+    ...listCliRuntimeModelBackendBindings().map((binding) => ({
+      provider: binding.provider,
+      runtime: binding.runtime,
+      cli: true,
+    })),
+  ];
+  for (const binding of runtimeBindings) {
+    const provider = normalizeProviderId(binding.provider);
+    const defaultModelId =
+      provider === normalizeProviderId(params.resolvedDefault.provider)
+        ? params.resolvedDefault.model
+        : undefined;
+    const choices = runtimeChoicesByProvider.get(provider) ?? [
+      buildDefaultRuntimeChoice({
+        cfg: params.cfg,
+        agentId: params.agentId,
+        provider,
+        modelId: defaultModelId,
+      }),
+    ];
+    addRuntimeChoice(choices, buildRuntimeChoice({ cfg: params.cfg, provider, runtime: "openclaw" }));
+    addRuntimeChoice(
+      choices,
+      buildRuntimeChoice({
+        cfg: params.cfg,
+        provider,
+        runtime: binding.runtime,
+        cli: binding.cli,
+      }),
+    );
+    runtimeChoicesByProvider.set(provider, choices);
+  }
+  return runtimeChoicesByProvider;
+}
+
 const modelsProviderDataCache = new Map<string, ModelsProviderDataCacheEntry>();
 
 export function resetModelsProviderDataCacheForTest(): void {
@@ -162,6 +226,7 @@ function resolveModelsProviderDataCacheKey(params: {
   agentId?: string;
   workspaceDir?: string;
   view?: "default" | "all";
+  mode?: ModelsProviderDataMode;
 }): string {
   const workspaceDir =
     params.workspaceDir ??
@@ -172,14 +237,16 @@ function resolveModelsProviderDataCacheKey(params: {
     params.agentId ?? "",
     workspaceDir,
     params.view ?? "default",
+    params.mode ?? "full",
   ].join("\u0000");
 }
 
 async function buildModelsProviderDataUncached(
   cfg: OpenClawConfig,
   agentId?: string,
-  options: { view?: "default" | "all"; workspaceDir?: string } = {},
+  options: { view?: "default" | "all"; workspaceDir?: string; mode?: ModelsProviderDataMode } = {},
 ): Promise<ModelsProviderData> {
+  const menuOnly = options.mode === "menu";
   const resolvedDefault = resolveDefaultModelForAgent({
     cfg,
     agentId,
@@ -237,7 +304,7 @@ async function buildModelsProviderDataUncached(
   const byProvider = new Map<string, Set<string>>();
   const add = (p: string, m: string) => {
     const key = normalizeProviderId(p);
-    if (!isModelsBrowseVisibleProvider(key)) {
+    if (menuOnly ? !isMenuVisibleProvider(key) : !isModelsBrowseVisibleProvider(key)) {
       return;
     }
     if (
@@ -302,6 +369,45 @@ async function buildModelsProviderDataUncached(
     add(entry.provider, entry.id);
   }
 
+  if (menuOnly) {
+    for (const raw of visibilityPolicy.exactModelRefs) {
+      addRawModelRef(raw);
+    }
+    add(resolvedDefault.provider, resolvedDefault.model);
+    addModelConfigEntries();
+
+    const data = {
+      byProvider,
+      providers: [...byProvider.keys()].toSorted(),
+      resolvedDefault,
+    } as ModelsProviderData;
+
+    let modelNamesCache: Map<string, string> | undefined;
+    let runtimeChoicesByProviderCache: Map<string, ModelsRuntimeChoice[]> | undefined;
+
+    Object.defineProperties(data, {
+      modelNames: {
+        enumerable: true,
+        get(): Map<string, string> {
+          modelNamesCache ??= buildModelsProviderModelNames({ catalog, visibleCatalog });
+          return modelNamesCache;
+        },
+      },
+      runtimeChoicesByProvider: {
+        enumerable: true,
+        get(): Map<string, ModelsRuntimeChoice[]> {
+          runtimeChoicesByProviderCache ??= buildModelsProviderRuntimeChoices({
+            cfg,
+            agentId,
+            resolvedDefault,
+          });
+          return runtimeChoicesByProviderCache;
+        },
+      },
+    });
+    return data;
+  }
+
   const hasAuth: (provider: string) => Promise<boolean> =
     options.view === "all"
       ? async () => true
@@ -321,63 +427,50 @@ async function buildModelsProviderDataUncached(
   addModelConfigEntries();
 
   const providers = [...byProvider.keys()].toSorted();
+  const data = {
+    byProvider,
+    providers,
+    resolvedDefault,
+  } as ModelsProviderData;
 
-  const modelNames = new Map<string, string>();
-  for (const entry of [...catalog, ...visibleCatalog]) {
-    if (entry.name && entry.name !== entry.id) {
-      modelNames.set(`${normalizeProviderId(entry.provider)}/${entry.id}`, entry.name);
-    }
-  }
+  let modelNamesCache: Map<string, string> | undefined;
+  let runtimeChoicesByProviderCache: Map<string, ModelsRuntimeChoice[]> | undefined;
 
-  const runtimeChoicesByProvider = new Map<string, ModelsRuntimeChoice[]>();
-  const runtimeBindings = [
-    { provider: "openai", runtime: "codex", cli: false },
-    ...listCliRuntimeModelBackendBindings().map((binding) => ({
-      provider: binding.provider,
-      runtime: binding.runtime,
-      cli: true,
-    })),
-  ];
-  for (const binding of runtimeBindings) {
-    const provider = normalizeProviderId(binding.provider);
-    const defaultModelId =
-      provider === normalizeProviderId(resolvedDefault.provider)
-        ? resolvedDefault.model
-        : undefined;
-    const choices = runtimeChoicesByProvider.get(provider) ?? [
-      buildDefaultRuntimeChoice({
-        cfg,
-        agentId,
-        provider,
-        modelId: defaultModelId,
-      }),
-    ];
-    addRuntimeChoice(choices, buildRuntimeChoice({ cfg, provider, runtime: "openclaw" }));
-    addRuntimeChoice(
-      choices,
-      buildRuntimeChoice({
-        cfg,
-        provider,
-        runtime: binding.runtime,
-        cli: binding.cli,
-      }),
-    );
-    runtimeChoicesByProvider.set(provider, choices);
-  }
+  Object.defineProperties(data, {
+    modelNames: {
+      enumerable: true,
+      get(): Map<string, string> {
+        modelNamesCache ??= buildModelsProviderModelNames({ catalog, visibleCatalog });
+        return modelNamesCache;
+      },
+    },
+    runtimeChoicesByProvider: {
+      enumerable: true,
+      get(): Map<string, ModelsRuntimeChoice[]> {
+        runtimeChoicesByProviderCache ??= buildModelsProviderRuntimeChoices({
+          cfg,
+          agentId,
+          resolvedDefault,
+        });
+        return runtimeChoicesByProviderCache;
+      },
+    },
+  });
 
-  return { byProvider, providers, resolvedDefault, modelNames, runtimeChoicesByProvider };
+  return data;
 }
 
 export async function buildModelsProviderData(
   cfg: OpenClawConfig,
   agentId?: string,
-  options: { view?: "default" | "all"; workspaceDir?: string } = {},
+  options: { view?: "default" | "all"; workspaceDir?: string; mode?: ModelsProviderDataMode } = {},
 ): Promise<ModelsProviderData> {
   const cacheKey = resolveModelsProviderDataCacheKey({
     cfg,
     agentId,
     workspaceDir: options.workspaceDir,
     view: options.view,
+    mode: options.mode,
   });
   const cached = modelsProviderDataCache.get(cacheKey);
   if (cached) {
@@ -565,15 +658,17 @@ export async function resolveModelsCommandReply(params: {
 
   const argText = body.replace(/^\/models\b/i, "").trim();
   const parsed = parseModelsArgs(argText);
+  const menuMode =
+    parsed.action === "providers" || (parsed.action === "list" && !parsed.provider && !parsed.all)
+      ? ("menu" as const)
+      : undefined;
 
-  const { byProvider, providers, modelNames } = await buildModelsProviderData(
-    params.cfg,
-    params.agentId,
-    {
-      ...(parsed.action === "list" && parsed.all ? { view: "all" as const } : {}),
-      workspaceDir: params.workspaceDir,
-    },
-  );
+  const data = await buildModelsProviderData(params.cfg, params.agentId, {
+    ...(parsed.action === "list" && parsed.all ? { view: "all" as const } : {}),
+    ...(menuMode ? { mode: menuMode } : {}),
+    workspaceDir: params.workspaceDir,
+  });
+  const { byProvider, providers } = data;
   const commandPlugin = params.surface ? getChannelPlugin(params.surface) : null;
   const providerInfos = buildProviderInfos({ providers, byProvider });
 
@@ -662,7 +757,7 @@ export async function resolveModelsCommandReply(params: {
     currentPage: interactivePage,
     totalPages: interactiveTotalPages,
     pageSize: interactivePageSize,
-    modelNames,
+    modelNames: data.modelNames,
   });
   if (interactiveChannelData) {
     return {

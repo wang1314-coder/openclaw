@@ -73,6 +73,11 @@ type ManifestModelCatalogCacheEntry = {
   rows: ModelCatalogEntry[];
 };
 let manifestModelCatalogCache = new WeakMap<OpenClawConfig, ManifestModelCatalogCacheEntry>();
+type ReadOnlyModelCatalogCacheEntry = {
+  withoutMetadataSnapshot: Promise<ModelCatalogEntry[]> | null;
+  withMetadataSnapshot: WeakMap<PluginMetadataSnapshot, Promise<ModelCatalogEntry[]>>;
+};
+let readOnlyModelCatalogCache = new WeakMap<OpenClawConfig, ReadOnlyModelCatalogCacheEntry>();
 const defaultImportAgentDiscovery = () => import("./agent-model-discovery.js");
 let importAgentDiscovery = defaultImportAgentDiscovery;
 const modelSuppressionLoader = createLazyImportLoader(
@@ -97,6 +102,7 @@ function loadProviderApiKeyResolver() {
 export function resetModelCatalogCache() {
   modelCatalogPromise = null;
   manifestModelCatalogCache = new WeakMap();
+  readOnlyModelCatalogCache = new WeakMap();
   hasLoggedModelCatalogError = false;
   hasLoggedReadOnlyStaticCatalogError = false;
 }
@@ -468,6 +474,63 @@ function loadReadOnlyStaticModelCatalog(params?: {
   return sortModelCatalogEntries(models);
 }
 
+function getReadOnlyModelCatalogCacheEntry(
+  config: OpenClawConfig,
+): ReadOnlyModelCatalogCacheEntry {
+  let cached = readOnlyModelCatalogCache.get(config);
+  if (!cached) {
+    cached = {
+      withoutMetadataSnapshot: null,
+      withMetadataSnapshot: new WeakMap(),
+    };
+    readOnlyModelCatalogCache.set(config, cached);
+  }
+  return cached;
+}
+
+function getCachedReadOnlyModelCatalog(params: {
+  config: OpenClawConfig;
+  metadataSnapshot?: PluginMetadataSnapshot;
+}): Promise<ModelCatalogEntry[]> | null {
+  const cached = getReadOnlyModelCatalogCacheEntry(params.config);
+  return params.metadataSnapshot
+    ? cached.withMetadataSnapshot.get(params.metadataSnapshot) ?? null
+    : cached.withoutMetadataSnapshot;
+}
+
+function setCachedReadOnlyModelCatalog(params: {
+  config: OpenClawConfig;
+  metadataSnapshot?: PluginMetadataSnapshot;
+  promise: Promise<ModelCatalogEntry[]>;
+}): void {
+  const cached = getReadOnlyModelCatalogCacheEntry(params.config);
+  if (params.metadataSnapshot) {
+    cached.withMetadataSnapshot.set(params.metadataSnapshot, params.promise);
+    return;
+  }
+  cached.withoutMetadataSnapshot = params.promise;
+}
+
+function clearCachedReadOnlyModelCatalog(params: {
+  config: OpenClawConfig;
+  metadataSnapshot?: PluginMetadataSnapshot;
+  promise: Promise<ModelCatalogEntry[]>;
+}): void {
+  const cached = readOnlyModelCatalogCache.get(params.config);
+  if (!cached) {
+    return;
+  }
+  if (params.metadataSnapshot) {
+    if (cached.withMetadataSnapshot.get(params.metadataSnapshot) === params.promise) {
+      cached.withMetadataSnapshot.delete(params.metadataSnapshot);
+    }
+    return;
+  }
+  if (cached.withoutMetadataSnapshot === params.promise) {
+    cached.withoutMetadataSnapshot = null;
+  }
+}
+
 export async function loadModelCatalog(params?: {
   config?: OpenClawConfig;
   useCache?: boolean;
@@ -476,13 +539,46 @@ export async function loadModelCatalog(params?: {
 }): Promise<ModelCatalogEntry[]> {
   const readOnly = params?.readOnly === true;
   if (readOnly) {
-    try {
-      return await loadReadOnlyPersistedModelCatalog(params);
-    } catch {
-      // Keep gateway models.list on side-effect-free sources. The RPC timeout
-      // cannot fire while provider discovery blocks the event loop.
-      return loadReadOnlyStaticModelCatalog(params);
+    const cfg = params?.config ?? getRuntimeConfig();
+    if (params?.useCache !== false) {
+      const cached = getCachedReadOnlyModelCatalog({
+        config: cfg,
+        metadataSnapshot: params?.metadataSnapshot,
+      });
+      if (cached) {
+        return cached;
+      }
     }
+    const readOnlyCatalogPromise = (async () => {
+      try {
+        return await loadReadOnlyPersistedModelCatalog({
+          ...params,
+          config: cfg,
+        });
+      } catch {
+        // Keep gateway models.list on side-effect-free sources. The RPC timeout
+        // cannot fire while provider discovery blocks the event loop.
+        return loadReadOnlyStaticModelCatalog({
+          ...params,
+          config: cfg,
+        });
+      }
+    })();
+    if (params?.useCache !== false) {
+      setCachedReadOnlyModelCatalog({
+        config: cfg,
+        metadataSnapshot: params?.metadataSnapshot,
+        promise: readOnlyCatalogPromise,
+      });
+      void readOnlyCatalogPromise.catch(() => {
+        clearCachedReadOnlyModelCatalog({
+          config: cfg,
+          metadataSnapshot: params?.metadataSnapshot,
+          promise: readOnlyCatalogPromise,
+        });
+      });
+    }
+    return readOnlyCatalogPromise;
   }
   if (!readOnly && params?.useCache === false) {
     modelCatalogPromise = null;

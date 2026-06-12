@@ -295,7 +295,7 @@ export async function replyWithDiscordModelPickerProviders(params: {
     accountId: params.accountId,
     threadBindings: params.threadBindings,
   });
-  const data = await loadDiscordModelPickerData(params.cfg, route.agentId);
+  const data = await loadDiscordModelPickerData(params.cfg, route.agentId, { mode: "menu" });
   const currentModel = resolveDiscordModelPickerCurrentModel({
     cfg: params.cfg,
     route,

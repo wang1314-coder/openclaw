@@ -97,6 +97,13 @@ export function createModelListAuthIndex(
   const authenticatedProviders = new Set<string>();
   const syntheticAuthProviders = new Set<string>();
   const envProviderAuthCache = new Map<string, boolean>();
+  let fallbackAuthLookupMaps:
+    | {
+        aliasMap: typeof aliasMap;
+        envCandidateMap: typeof envCandidateMap;
+        authEvidenceMap: typeof authEvidenceMap;
+      }
+    | undefined;
   const credentialAuthsProvider = (credential: AuthProfileCredential): boolean => {
     const normalizedProvider = normalizeStoredAuthProvider(credential.provider, aliasMap);
     if (normalizedProvider !== OPENAI_PROVIDER_ID) {
@@ -189,13 +196,17 @@ export function createModelListAuthIndex(
     }
     const hasPrecomputedCandidates = Object.hasOwn(envCandidateMap, normalized);
     const hasPrecomputedEvidence = Object.hasOwn(authEvidenceMap, normalized);
+    const lookupMaps =
+      hasPrecomputedCandidates || hasPrecomputedEvidence
+        ? { aliasMap, envCandidateMap, authEvidenceMap }
+        : (fallbackAuthLookupMaps ??= resolveProviderEnvAuthLookupMaps(lookupParams));
+    // Reuse the index-wide lookup maps so a miss does not trigger a second
+    // metadata walk inside resolveEnvApiKey().
     const hasAuth = Boolean(
       resolveEnvApiKey(provider, env, {
-        aliasMap,
-        candidateMap:
-          skipSetupProviderFallback || hasPrecomputedCandidates ? envCandidateMap : undefined,
-        authEvidenceMap:
-          skipSetupProviderFallback || hasPrecomputedEvidence ? authEvidenceMap : undefined,
+        aliasMap: lookupMaps.aliasMap,
+        candidateMap: lookupMaps.envCandidateMap,
+        authEvidenceMap: lookupMaps.authEvidenceMap,
         skipSetupProviderFallback,
         config: params.cfg,
         workspaceDir: params.workspaceDir,

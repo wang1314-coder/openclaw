@@ -427,6 +427,40 @@ describe("loadModelCatalog", () => {
     ]);
   });
 
+  it("reuses the read-only catalog cache for repeated read-only loads", async () => {
+    const cfg = {} as OpenClawConfig;
+    const metadataSnapshot = emptyPluginMetadataSnapshot();
+    readFileMock.mockResolvedValue(
+      JSON.stringify({
+        providers: {
+          openai: {
+            models: [{ id: "gpt-4.1", name: "GPT-4.1" }],
+          },
+        },
+      }),
+    );
+    currentPluginMetadataSnapshotMock.mockReturnValue(undefined);
+
+    const first = await loadModelCatalog({
+      config: cfg,
+      readOnly: true,
+      metadataSnapshot: metadataSnapshot as unknown as NonNullable<
+        Parameters<typeof loadModelCatalog>[0]
+      >["metadataSnapshot"],
+    });
+    const second = await loadModelCatalog({
+      config: cfg,
+      readOnly: true,
+      metadataSnapshot: metadataSnapshot as unknown as NonNullable<
+        Parameters<typeof loadModelCatalog>[0]
+      >["metadataSnapshot"],
+    });
+
+    expect(second).toBe(first);
+    expect(readFileMock).toHaveBeenCalledTimes(1);
+    expect(loadPluginMetadataSnapshotMock).not.toHaveBeenCalled();
+  });
+
   it("returns partial results on discovery errors", async () => {
     setLoggerOverride({ level: "silent", consoleLevel: "warn" });
     try {

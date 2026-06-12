@@ -199,9 +199,10 @@ function paginateItems<T>(params: {
 export async function loadDiscordModelPickerData(
   cfg: OpenClawConfig,
   agentId?: string,
+  options?: { mode?: "full" | "menu" },
 ): Promise<ModelsProviderData> {
   const { buildModelsProviderData } = await loadModelsProviderRuntime();
-  return buildModelsProviderData(cfg, agentId);
+  return buildModelsProviderData(cfg, agentId, options);
 }
 
 export function buildDiscordModelPickerCustomId(params: {

@@ -91,7 +91,18 @@ describe("loadDiscordModelPickerData", () => {
     const result = await loadDiscordModelPickerData(cfg, "support");
 
     expect(buildModelsProviderDataMock).toHaveBeenCalledTimes(1);
-    expect(buildModelsProviderDataMock).toHaveBeenCalledWith(cfg, "support");
+    expect(buildModelsProviderDataMock).toHaveBeenCalledWith(cfg, "support", undefined);
+    expect(result).toBe(expected);
+  });
+
+  it("passes through menu mode for lighter provider-picker opens", async () => {
+    const expected = createModelsProviderData({ openai: ["gpt-4o"] });
+    const cfg = EMPTY_DISCORD_TEST_CONFIG;
+    buildModelsProviderDataMock.mockResolvedValue(expected);
+
+    const result = await loadDiscordModelPickerData(cfg, "support", { mode: "menu" });
+
+    expect(buildModelsProviderDataMock).toHaveBeenCalledWith(cfg, "support", { mode: "menu" });
     expect(result).toBe(expected);
   });
 });

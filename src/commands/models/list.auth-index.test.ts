@@ -169,6 +169,52 @@ describe("createModelListAuthIndex", () => {
     expect(index.hasProviderAuth("google-vertex")).toBe(true);
   });
 
+  it("reuses fallback auth lookup maps across repeated index creation", async () => {
+    envCandidateMocks.resolveProviderEnvAuthLookupMaps
+      .mockReturnValueOnce({
+        aliasMap: {},
+        envCandidateMap: {},
+        authEvidenceMap: {},
+        setupProviderFallbackRefs: [],
+      })
+      .mockReturnValueOnce({
+        aliasMap: {},
+        envCandidateMap: {},
+        authEvidenceMap: {},
+        setupProviderFallbackRefs: [],
+      });
+
+    const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-list-auth-index-"));
+    const credentialsPath = path.join(tempRoot, "adc.json");
+    await fs.writeFile(credentialsPath, "{}", "utf8");
+
+    try {
+      const env = {
+        GOOGLE_APPLICATION_CREDENTIALS: credentialsPath,
+        GOOGLE_CLOUD_LOCATION: "us-central1",
+        GOOGLE_CLOUD_PROJECT: "vertex-project",
+      };
+      const firstIndex = createModelListAuthIndex({
+        cfg: {},
+        authStore: emptyStore,
+        env,
+      });
+      const secondIndex = createModelListAuthIndex({
+        cfg: {},
+        authStore: emptyStore,
+        env,
+      });
+
+      expect(firstIndex.hasProviderAuth("google-vertex")).toBe(true);
+      expect(firstIndex.hasProviderAuth("anthropic-vertex")).toBe(true);
+      expect(secondIndex.hasProviderAuth("google-vertex")).toBe(true);
+      expect(secondIndex.hasProviderAuth("anthropic-vertex")).toBe(true);
+      expect(envCandidateMocks.resolveProviderEnvAuthLookupMaps).toHaveBeenCalledTimes(4);
+    } finally {
+      await fs.rm(tempRoot, { recursive: true, force: true });
+    }
+  });
+
   it("does not rediscover resolver-only env auth when a command metadata snapshot is supplied", () => {
     envCandidateMocks.resolveProviderEnvAuthLookupMaps.mockReturnValueOnce({
       aliasMap: {},
