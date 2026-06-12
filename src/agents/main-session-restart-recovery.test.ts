@@ -26,10 +26,32 @@ vi.mock("../gateway/call.js", () => ({
   callGateway: vi.fn(async () => ({ runId: "run-resumed" })),
 }));
 
+// Default to the real transcript-append implementation; individual tests can
+// override appendInjectedAssistantMessageToTranscript to exercise the not-ok path.
+const transcriptAppendOverride: {
+  current:
+    | ((params: { transcriptPath: string }) => Promise<{ ok: boolean; error?: string }>)
+    | null;
+} = { current: null };
+
+vi.mock("../gateway/server-methods/chat-transcript-inject.js", async () => {
+  const actual = await vi.importActual<
+    typeof import("../gateway/server-methods/chat-transcript-inject.js")
+  >("../gateway/server-methods/chat-transcript-inject.js");
+  return {
+    ...actual,
+    appendInjectedAssistantMessageToTranscript: (params: { transcriptPath: string }) =>
+      (transcriptAppendOverride.current ?? actual.appendInjectedAssistantMessageToTranscript)(
+        params as Parameters<typeof actual.appendInjectedAssistantMessageToTranscript>[0],
+      ),
+  };
+});
+
 let tmpDir: string;
 
 beforeEach(async () => {
   vi.clearAllMocks();
+  transcriptAppendOverride.current = null;
   tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-main-restart-recovery-"));
 });
 
@@ -988,5 +1010,246 @@ describe("main-session-restart-recovery", () => {
     const store = loadSessionStore(path.join(sessionsDir, "sessions.json"));
     expect(store["agent:main:demo-channel:room-1"]?.status).toBe("failed");
     expect(store["agent:main:demo-channel:room-1"]?.abortedLastRun).toBe(true);
+  });
+
+  it("persists the recovery notice to the WebChat transcript instead of an outbound action (#87808)", async () => {
+    const sessionsDir = await makeSessionsDir();
+    await writeStore(sessionsDir, {
+      "agent:main:webchat:room-1": {
+        sessionId: "main-session",
+        updatedAt: Date.now() - 10_000,
+        status: "running",
+        abortedLastRun: true,
+        sessionFile: "main-session.jsonl",
+        lastChannel: "webchat",
+        lastTo: "webchat:room-1",
+        lastAccountId: "default",
+      },
+    });
+    await writeTranscript(sessionsDir, "main-session", [
+      { role: "user", content: "do the thing" },
+      { role: "assistant", content: "partial answer" },
+    ]);
+
+    const result = await recoverRestartAbortedMainSessions({ stateDir: tmpDir });
+
+    expect(result).toEqual({ recovered: 0, failed: 1, skipped: 0 });
+    // WebChat is an internal-only channel that rejects outbound message.action,
+    // so no gateway send is issued for the recovery notice.
+    const issuedMessageAction = vi
+      .mocked(callGateway)
+      .mock.calls.some((c) => (c[0] as { method?: string })?.method === "message.action");
+    expect(issuedMessageAction).toBe(false);
+    // The notice is persisted to the session transcript (disk), so a reconnecting
+    // WebChat client renders the terminal notice instead of a silently vanished turn.
+    // The notice is appended to the transcript the WebChat read path resolves
+    // (<sessionsDir>/<sessionFile>), not a raw/out-of-dir persisted path.
+    const transcript = await fs.readFile(path.join(sessionsDir, "main-session.jsonl"), "utf8");
+    expect(transcript).toContain("couldn't safely resume");
+    const store = loadSessionStore(path.join(sessionsDir, "sessions.json"));
+    expect(store["agent:main:webchat:room-1"]?.status).toBe("failed");
+  });
+
+  it("persists the WebChat recovery notice to the session-id transcript when sessionFile is missing (#87808)", async () => {
+    const sessionsDir = await makeSessionsDir();
+    // No persisted sessionFile: the recovery notice must still land on the
+    // transcript the WebChat read path resolves (<sessionId>.jsonl in the
+    // sessions dir), not be dropped for lack of an explicit sessionFile.
+    await writeStore(sessionsDir, {
+      "agent:main:webchat:room-1": {
+        sessionId: "main-session",
+        updatedAt: Date.now() - 10_000,
+        status: "running",
+        abortedLastRun: true,
+        lastChannel: "webchat",
+        lastTo: "webchat:room-1",
+        lastAccountId: "default",
+      },
+    });
+    await writeTranscript(sessionsDir, "main-session", [
+      { role: "user", content: "do the thing" },
+      { role: "assistant", content: "partial answer" },
+    ]);
+
+    const result = await recoverRestartAbortedMainSessions({ stateDir: tmpDir });
+
+    expect(result).toEqual({ recovered: 0, failed: 1, skipped: 0 });
+    const issuedMessageAction = vi
+      .mocked(callGateway)
+      .mock.calls.some((c) => (c[0] as { method?: string })?.method === "message.action");
+    expect(issuedMessageAction).toBe(false);
+    const transcript = await fs.readFile(path.join(sessionsDir, "main-session.jsonl"), "utf8");
+    expect(transcript).toContain("couldn't safely resume");
+    const store = loadSessionStore(path.join(sessionsDir, "sessions.json"));
+    expect(store["agent:main:webchat:room-1"]?.status).toBe("failed");
+  });
+
+  it("persists the WebChat recovery notice to the session-id transcript when sessionFile points outside the sessions dir (#87808)", async () => {
+    const sessionsDir = await makeSessionsDir();
+    // A stale/out-of-dir sessionFile must not be appended to verbatim; the
+    // resolver clamps the notice back to <sessionId>.jsonl inside the sessions dir.
+    await writeStore(sessionsDir, {
+      "agent:main:webchat:room-1": {
+        sessionId: "main-session",
+        updatedAt: Date.now() - 10_000,
+        status: "running",
+        abortedLastRun: true,
+        sessionFile: "../escape/outside.jsonl",
+        lastChannel: "webchat",
+        lastTo: "webchat:room-1",
+        lastAccountId: "default",
+      },
+    });
+    await writeTranscript(sessionsDir, "main-session", [
+      { role: "user", content: "do the thing" },
+      { role: "assistant", content: "partial answer" },
+    ]);
+
+    const result = await recoverRestartAbortedMainSessions({ stateDir: tmpDir });
+
+    expect(result).toEqual({ recovered: 0, failed: 1, skipped: 0 });
+    const transcript = await fs.readFile(path.join(sessionsDir, "main-session.jsonl"), "utf8");
+    expect(transcript).toContain("couldn't safely resume");
+    // The out-of-dir target must never be written.
+    await expect(
+      fs.access(path.join(tmpDir, "agents", "main", "escape", "outside.jsonl")),
+    ).rejects.toThrow();
+    const store = loadSessionStore(path.join(sessionsDir, "sessions.json"));
+    expect(store["agent:main:webchat:room-1"]?.status).toBe("failed");
+  });
+
+  it("persists the WebChat recovery notice to <sessionId>.jsonl when sessionFile is a stale in-dir transcript the reconnect read path skips (#87808)", async () => {
+    const sessionsDir = await makeSessionsDir();
+    const sessionId = "11111111-1111-4111-8111-111111111111";
+    const staleSessionFile = "22222222-2222-4222-8222-222222222222.jsonl";
+    // sessionFile belongs to a *different* generated session id but still
+    // resolves cleanly inside the sessions dir, so the old resolver would have
+    // appended the notice to it. The reconnect read path
+    // (resolveSessionTranscriptCandidates) classifies that as stale and reads
+    // <sessionId>.jsonl first, so the write path must target <sessionId>.jsonl
+    // too or the reconnecting WebChat client never sees the notice.
+    await writeStore(sessionsDir, {
+      "agent:main:webchat:room-1": {
+        sessionId,
+        updatedAt: Date.now() - 10_000,
+        status: "running",
+        abortedLastRun: true,
+        sessionFile: staleSessionFile,
+        lastChannel: "webchat",
+        lastTo: "webchat:room-1",
+        lastAccountId: "default",
+      },
+    });
+    await writeTranscript(sessionsDir, sessionId, [
+      { role: "user", content: "do the thing" },
+      { role: "assistant", content: "partial answer" },
+    ]);
+
+    const result = await recoverRestartAbortedMainSessions({ stateDir: tmpDir });
+
+    expect(result).toEqual({ recovered: 0, failed: 1, skipped: 0 });
+    const issuedMessageAction = vi
+      .mocked(callGateway)
+      .mock.calls.some((c) => (c[0] as { method?: string })?.method === "message.action");
+    expect(issuedMessageAction).toBe(false);
+    // The notice lands on the read-path preferred candidate (<sessionId>.jsonl)...
+    const transcript = await fs.readFile(path.join(sessionsDir, `${sessionId}.jsonl`), "utf8");
+    expect(transcript).toContain("couldn't safely resume");
+    // ...and never on the stale in-dir sessionFile the reconnect read path skips.
+    await expect(fs.access(path.join(sessionsDir, staleSessionFile))).rejects.toThrow();
+    const store = loadSessionStore(path.join(sessionsDir, "sessions.json"));
+    expect(store["agent:main:webchat:room-1"]?.status).toBe("failed");
+  });
+
+  it("appends the WebChat recovery notice to the existing canonical <sessionId>.jsonl when a custom sessionFile is missing (#87808)", async () => {
+    const sessionsDir = await makeSessionsDir();
+    const sessionId = "main-session";
+    // A custom/timestamped sessionFile that the resolver classifies as `custom`
+    // (not stale): its `-topic-` prefix is not a generated session id, so it
+    // resolves cleanly inside the sessions dir and would be the read path's
+    // *preferred* (first) candidate. Crucially we never create it on disk, so
+    // it is a missing preferred candidate while the canonical <sessionId>.jsonl
+    // already holds the real (unresumable) history.
+    const customSessionFile = "main-session-topic-9999.jsonl";
+    await writeStore(sessionsDir, {
+      "agent:main:webchat:room-1": {
+        sessionId,
+        updatedAt: Date.now() - 10_000,
+        status: "running",
+        abortedLastRun: true,
+        sessionFile: customSessionFile,
+        lastChannel: "webchat",
+        lastTo: "webchat:room-1",
+        lastAccountId: "default",
+      },
+    });
+    // The real session history lives in the existing canonical transcript.
+    await writeTranscript(sessionsDir, sessionId, [
+      { role: "user", content: "do the thing" },
+      { role: "assistant", content: "partial answer" },
+    ]);
+
+    const result = await recoverRestartAbortedMainSessions({ stateDir: tmpDir });
+
+    expect(result).toEqual({ recovered: 0, failed: 1, skipped: 0 });
+    const issuedMessageAction = vi
+      .mocked(callGateway)
+      .mock.calls.some((c) => (c[0] as { method?: string })?.method === "message.action");
+    expect(issuedMessageAction).toBe(false);
+    // (a) The notice is appended to the existing canonical <sessionId>.jsonl,
+    // which is the first *existing* candidate the reconnect read path serves.
+    const transcript = await fs.readFile(path.join(sessionsDir, `${sessionId}.jsonl`), "utf8");
+    expect(transcript).toContain("couldn't safely resume");
+    // (c) The original user/assistant history is preserved (the notice is
+    // appended, not replaced by a notice-only transcript).
+    expect(transcript).toContain("do the thing");
+    expect(transcript).toContain("partial answer");
+    // (b) The missing custom sessionFile must never be created: appending the
+    // notice there would create a notice-only transcript that reconnect reads
+    // first, hiding the real session history.
+    await expect(fs.access(path.join(sessionsDir, customSessionFile))).rejects.toThrow();
+    const store = loadSessionStore(path.join(sessionsDir, "sessions.json"));
+    expect(store["agent:main:webchat:room-1"]?.status).toBe("failed");
+  });
+
+  it("reports a not-ok WebChat transcript append as a failed notice (#87808)", async () => {
+    const sessionsDir = await makeSessionsDir();
+    await writeStore(sessionsDir, {
+      "agent:main:webchat:room-1": {
+        sessionId: "main-session",
+        updatedAt: Date.now() - 10_000,
+        status: "running",
+        abortedLastRun: true,
+        sessionFile: "main-session.jsonl",
+        lastChannel: "webchat",
+        lastTo: "webchat:room-1",
+        lastAccountId: "default",
+      },
+    });
+    await writeTranscript(sessionsDir, "main-session", [
+      { role: "user", content: "do the thing" },
+      { role: "assistant", content: "partial answer" },
+    ]);
+
+    // appendInjectedAssistantMessageToTranscript swallows write errors and
+    // returns { ok: false } rather than throwing. The recovery path must treat
+    // that as a delivery failure instead of logging success.
+    const appendSpy = vi.fn(async (params: { transcriptPath: string }) => {
+      expect(params.transcriptPath).toBe(path.join(sessionsDir, "main-session.jsonl"));
+      return { ok: false as const, error: "disk full" };
+    });
+    transcriptAppendOverride.current = appendSpy;
+
+    const result = await recoverRestartAbortedMainSessions({ stateDir: tmpDir });
+
+    expect(result).toEqual({ recovered: 0, failed: 1, skipped: 0 });
+    expect(appendSpy).toHaveBeenCalledOnce();
+    const issuedMessageAction = vi
+      .mocked(callGateway)
+      .mock.calls.some((c) => (c[0] as { method?: string })?.method === "message.action");
+    expect(issuedMessageAction).toBe(false);
+    // The session is still marked failed regardless of notice delivery outcome.
+    const store = loadSessionStore(path.join(sessionsDir, "sessions.json"));
+    expect(store["agent:main:webchat:room-1"]?.status).toBe("failed");
   });
 });

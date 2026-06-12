@@ -18,7 +18,11 @@ import {
 } from "../config/sessions.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import { callGateway } from "../gateway/call.js";
-import { readSessionMessagesAsync } from "../gateway/session-utils.fs.js";
+import { appendInjectedAssistantMessageToTranscript } from "../gateway/server-methods/chat-transcript-inject.js";
+import {
+  readSessionMessagesAsync,
+  resolveSessionTranscriptCandidates,
+} from "../gateway/session-utils.fs.js";
 import { resolveGatewaySessionStoreTarget } from "../gateway/session-utils.js";
 import { createSubsystemLogger } from "../logging/subsystem.js";
 import { CommandLane } from "../process/lanes.js";
@@ -29,6 +33,7 @@ import {
   normalizeDeliveryContext,
   type DeliveryContext,
 } from "../utils/delivery-context.shared.js";
+import { INTERNAL_MESSAGE_CHANNEL } from "../utils/message-channel-constants.js";
 import { isDeliverableMessageChannel } from "../utils/message-channel.js";
 import {
   listActiveEmbeddedRunSessionIds,
@@ -373,12 +378,109 @@ async function markSessionFailed(params: {
   log.warn(`marked interrupted main session failed: ${params.sessionKey} (${params.reason})`);
 }
 
+/**
+ * Resolve the transcript path the reconnecting client (e.g. WebChat) actually
+ * reads, using the exact same candidate ordering as the read path
+ * (`resolveSessionTranscriptCandidates`). The first candidate is the file the
+ * reconnect read path resolves first, so appending the recovery notice there
+ * guarantees a reconnecting WebChat client sees it. Crucially this matches the
+ * read path's stale handling: when `entry.sessionFile` is missing or points at
+ * a stale/out-of-dir transcript, the read path prefers `<sessionId>.jsonl`
+ * inside the sessions dir, so the notice must land there too (not on the raw
+ * persisted `sessionFile`, which reconnect would never read).
+ */
+function resolveRecoveryNoticeTranscriptPath(params: {
+  entry: SessionEntry;
+  storePath: string;
+}): string | undefined {
+  const candidates = resolveSessionTranscriptCandidates(
+    params.entry.sessionId,
+    params.storePath,
+    params.entry.sessionFile,
+    // SessionEntry has no agentId; storePath already anchors candidates to the
+    // sessions dir, so the resolver handles the missing agentId on its own.
+    undefined,
+  );
+  // The read path serves the first *existing* candidate, so append the notice
+  // there. Appending to a non-existent preferred candidate would create a
+  // notice-only transcript that reconnect then reads first, hiding the real
+  // session history (e.g. a missing custom/timestamped sessionFile alongside an
+  // existing canonical <sessionId>.jsonl). Only create the read-path preferred
+  // target when no candidate exists yet.
+  const existingCandidate = candidates.find((candidate) => fs.existsSync(candidate));
+  if (existingCandidate) {
+    return existingCandidate;
+  }
+  if (candidates[0]) {
+    return candidates[0];
+  }
+  // Fall back to the prior behavior so a notice is never silently dropped when
+  // the resolver yields no candidates (e.g. an invalid session id/metadata).
+  try {
+    return resolveSessionTranscriptPathInDir(
+      params.entry.sessionId,
+      path.dirname(params.storePath),
+    );
+  } catch {
+    // Keep restart recovery best-effort when session id/metadata is invalid.
+    return undefined;
+  }
+}
+
 async function sendUnresumableSessionNotice(params: {
   cfg?: OpenClawConfig;
   entry: SessionEntry;
   reason: string;
   sessionKey: string;
+  transcriptPath?: string;
 }): Promise<boolean> {
+  // WebChat is an internal-only channel: isDeliverableMessageChannel rejects it,
+  // so resolveRestartRecoveryDeliveryContext returns undefined and the notice
+  // would never reach the user (the interrupted turn just vanishes on reconnect).
+  // Detect it from the raw delivery channel up front and persist the notice to the
+  // session transcript instead, so a reconnecting WebChat client sees it (#87808).
+  const rawChannel = normalizeOptionalString(
+    (
+      normalizeDeliveryContext(params.entry.pendingFinalDeliveryContext) ??
+      normalizeDeliveryContext(params.entry.restartRecoveryDeliveryContext) ??
+      deliveryContextFromSession(params.entry)
+    )?.channel,
+  );
+  if (rawChannel === INTERNAL_MESSAGE_CHANNEL) {
+    if (!params.transcriptPath) {
+      return false;
+    }
+    try {
+      const appendResult = await appendInjectedAssistantMessageToTranscript({
+        transcriptPath: params.transcriptPath,
+        message: UNRESUMABLE_SESSION_NOTICE,
+        sessionKey: params.sessionKey,
+        idempotencyKey: `main-session-restart-recovery:${params.entry.sessionId}:failed-notice`,
+        ...(params.cfg ? { config: params.cfg } : {}),
+      });
+      if (!appendResult.ok) {
+        // appendInjectedAssistantMessageToTranscript swallows write errors and
+        // returns { ok: false } instead of throwing, so the reconnecting WebChat
+        // client would never see the notice. Surface that as a delivery failure.
+        log.warn(
+          `failed to persist interrupted main session recovery notice ${params.sessionKey}: ${
+            appendResult.error ?? "transcript append returned not-ok"
+          }`,
+        );
+        return false;
+      }
+      log.info(
+        `persisted interrupted main session recovery notice to transcript: ${params.sessionKey} (${params.reason})`,
+      );
+      return true;
+    } catch (err) {
+      log.warn(
+        `failed to persist interrupted main session recovery notice ${params.sessionKey}: ${String(err)}`,
+      );
+      return false;
+    }
+  }
+
   const deliveryContext = resolveRestartRecoveryDeliveryContext({
     cfg: params.cfg,
     entry: params.entry,
@@ -720,6 +822,10 @@ async function recoverStore(params: {
         entry,
         sessionKey,
         reason: resumeBlockReason,
+        transcriptPath: resolveRecoveryNoticeTranscriptPath({
+          entry,
+          storePath: params.storePath,
+        }),
       });
       await markSessionFailed({
         storePath: params.storePath,
