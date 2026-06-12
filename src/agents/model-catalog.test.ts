@@ -1,5 +1,5 @@
 // Covers model catalog loading, plugin manifests, normalization, and suppression.
-import { mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import type { OpenClawConfig } from "../config/config.js";
 import { resetLogger, setLoggerOverride } from "../logging/logger.js";
@@ -136,6 +136,16 @@ function modelIdNormalizationSnapshot() {
       },
     ],
   };
+}
+
+function loadAnthropicManifestPlugin(): Record<string, unknown> {
+  const manifest = JSON.parse(
+    readFileSync(
+      new URL("../../extensions/anthropic/openclaw.plugin.json", import.meta.url),
+      "utf8",
+    ),
+  ) as Record<string, unknown>;
+  return { ...manifest, origin: "bundled" };
 }
 
 function manifestModelCatalogSnapshot(model: {
@@ -1144,6 +1154,43 @@ describe("loadModelCatalog", () => {
       },
     ]);
     expect(loadPluginMetadataSnapshotMock).not.toHaveBeenCalled();
+  });
+
+  it("loads Anthropic Haiku 4.5 from the bundled manifest catalog", () => {
+    const manifest = loadAnthropicManifestPlugin();
+    currentPluginMetadataSnapshotMock.mockReturnValue({
+      ...emptyPluginMetadataSnapshot(),
+      plugins: [manifest],
+    });
+
+    const result = loadManifestModelCatalog({ config: {} as OpenClawConfig });
+
+    const rollingEntry = requireCatalogEntry(result, "anthropic", "claude-haiku-4-5");
+    expect(rollingEntry).toMatchObject({
+      name: "Claude Haiku 4.5",
+      input: ["text", "image"],
+      reasoning: true,
+      contextWindow: 200000,
+      maxTokens: 64000,
+    });
+    expect(rollingEntry.mediaInput).toEqual({
+      image: { maxSidePx: 1568, preferredSidePx: 1568, tokenMode: "provider" },
+    });
+    const datedEntry = requireCatalogEntry(result, "anthropic", "claude-haiku-4-5-20251001");
+    expect(datedEntry).toMatchObject({
+      name: "Claude Haiku 4.5 (2025-10-01)",
+      input: ["text", "image"],
+      reasoning: true,
+      contextWindow: 200000,
+      maxTokens: 64000,
+    });
+    const aliases = (
+      manifest.modelIdNormalization as {
+        providers?: { anthropic?: { aliases?: Record<string, string> } };
+      }
+    ).providers?.anthropic?.aliases;
+    expect(aliases?.["claude-haiku-4-5"]).toBeUndefined();
+    expect(aliases?.["claude-haiku-4.5"]).toBe("claude-haiku-4-5");
   });
 
   it("loads manifest model id policies once for persisted read-only catalog rows", async () => {
