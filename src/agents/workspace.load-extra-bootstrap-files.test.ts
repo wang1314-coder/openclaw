@@ -63,6 +63,131 @@ describe("loadExtraBootstrapFiles", () => {
     ]);
   });
 
+  it("matches broad globs under directories named like build outputs", async () => {
+    // Regression: the walker must match the same file set as fs.glob. A broad
+    // pattern like `**/AGENTS.md` includes files under directories such as
+    // `dist` — there is no ignored-directory pruning that would silently change
+    // which files an existing configured pattern matches on upgrade.
+    const workspaceDir = await createWorkspaceDir("glob-no-pruning");
+    const distDir = path.join(workspaceDir, "dist");
+    await fs.mkdir(distDir, { recursive: true });
+    await fs.writeFile(path.join(distDir, "AGENTS.md"), "dist agents", "utf-8");
+
+    const files = await loadExtraBootstrapFiles(workspaceDir, ["**/AGENTS.md"]);
+
+    expect(files).toStrictEqual([
+      {
+        name: "AGENTS.md",
+        path: path.join(distDir, "AGENTS.md"),
+        content: "dist agents",
+        missing: false,
+      },
+    ]);
+  });
+
+  it("honors explicit globs rooted in an ignored directory", async () => {
+    const workspaceDir = await createWorkspaceDir("glob-explicit-ignored-dir");
+    const distDir = path.join(workspaceDir, "dist", "nested");
+    await fs.mkdir(distDir, { recursive: true });
+    await fs.writeFile(path.join(distDir, "AGENTS.md"), "dist agents", "utf-8");
+
+    const files = await loadExtraBootstrapFiles(workspaceDir, ["dist/**/AGENTS.md"]);
+
+    expect(files).toStrictEqual([
+      {
+        name: "AGENTS.md",
+        path: path.join(distDir, "AGENTS.md"),
+        content: "dist agents",
+        missing: false,
+      },
+    ]);
+  });
+
+  it("returns every matching file without an artificial match cap", async () => {
+    const workspaceDir = await createWorkspaceDir("glob-no-match-cap");
+    const fileCount = 140;
+    await Promise.all(
+      Array.from({ length: fileCount }, async (_, index) => {
+        const packageDir = path.join(workspaceDir, "packages", `pkg-${index}`);
+        await fs.mkdir(packageDir, { recursive: true });
+        await fs.writeFile(path.join(packageDir, "AGENTS.md"), `agents ${index}`, "utf-8");
+      }),
+    );
+
+    const { files, diagnostics } = await loadExtraBootstrapFilesWithDiagnostics(workspaceDir, [
+      "packages/*/AGENTS.md",
+    ]);
+
+    // All matches within the traversal bound are returned; downstream bootstrap
+    // character budgeting handles content limiting, not a glob match cap.
+    expect(files).toHaveLength(fileCount);
+    expect(diagnostics).toHaveLength(0);
+  });
+
+  it("returns matches that appear late in a deep tree without truncation", async () => {
+    // Regression: a sparse pattern can yield zero matches until very late in a
+    // large tree. The walker yields periodically to avoid the fs.glob event-loop
+    // stall, but it must still walk the whole tree and return every real match —
+    // no hard traversal cutoff that silently drops late configured globs.
+    const workspaceDir = await createWorkspaceDir("glob-sparse-late-match");
+
+    // Build a modest deep tree with plenty of non-matching entries, then place
+    // the only AGENTS.md deep at the end so it is reached late in traversal.
+    const dirCount = 60;
+    const filesPerDir = 30;
+    await Promise.all(
+      Array.from({ length: dirCount }, async (_, dirIndex) => {
+        const branchDir = path.join(workspaceDir, `branch-${dirIndex}`, "nested");
+        await fs.mkdir(branchDir, { recursive: true });
+        await Promise.all(
+          Array.from({ length: filesPerDir }, (__, fileIndex) =>
+            fs.writeFile(path.join(branchDir, `noise-${fileIndex}.txt`), "x", "utf-8"),
+          ),
+        );
+      }),
+    );
+    const lateDir = path.join(workspaceDir, "zzz-late", "deep");
+    await fs.mkdir(lateDir, { recursive: true });
+    await fs.writeFile(path.join(lateDir, "AGENTS.md"), "late agents", "utf-8");
+
+    const { files, diagnostics } = await loadExtraBootstrapFilesWithDiagnostics(workspaceDir, [
+      "**/AGENTS.md",
+    ]);
+
+    // The late match is still returned and no truncation diagnostic is emitted.
+    expect(files).toStrictEqual([
+      {
+        name: "AGENTS.md",
+        path: path.join(lateDir, "AGENTS.md"),
+        content: "late agents",
+        missing: false,
+      },
+    ]);
+    expect(diagnostics).toHaveLength(0);
+  });
+
+  it("returns matches in lexicographically sorted normalized-relative-path order", async () => {
+    // Regression: the walker visits directories in filesystem order, which varies
+    // across machines. Matches must come back sorted by normalized relative path
+    // so bootstrap byte order stays deterministic and the prompt cache is stable.
+    const workspaceDir = await createWorkspaceDir("glob-stable-order");
+    // Create siblings whose sorted order differs from creation order.
+    for (const name of ["zeta", "alpha", "mid", "beta"]) {
+      const packageDir = path.join(workspaceDir, "packages", name);
+      await fs.mkdir(packageDir, { recursive: true });
+      await fs.writeFile(path.join(packageDir, "AGENTS.md"), name, "utf-8");
+    }
+
+    const files = await loadExtraBootstrapFiles(workspaceDir, ["packages/*/AGENTS.md"]);
+
+    expect(files.map((file) => file.path)).toStrictEqual([
+      path.join(workspaceDir, "packages", "alpha", "AGENTS.md"),
+      path.join(workspaceDir, "packages", "beta", "AGENTS.md"),
+      path.join(workspaceDir, "packages", "mid", "AGENTS.md"),
+      path.join(workspaceDir, "packages", "zeta", "AGENTS.md"),
+    ]);
+  });
+
   it("loads literal bootstrap paths with square brackets", async () => {
     const workspaceDir = await createWorkspaceDir("literal-brackets");
     const packageDir = path.join(workspaceDir, "pkg[1]");
