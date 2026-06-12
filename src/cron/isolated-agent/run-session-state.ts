@@ -55,6 +55,7 @@ export function createPersistCronSessionEntry(params: {
   isFastTestEnv: boolean;
   cronSession: MutableCronSession;
   agentSessionKey: string;
+  runSessionKey?: string;
   updateSessionStore: UpdateSessionStore;
 }): PersistCronSessionEntry {
   return async () => {
@@ -70,8 +71,14 @@ export function createPersistCronSessionEntry(params: {
     // Update both the in-memory store and persisted JSON so later operations in
     // this process observe the same session entry that hit disk.
     params.cronSession.store[params.agentSessionKey] = persistedEntry;
+    if (params.runSessionKey && params.runSessionKey !== params.agentSessionKey) {
+      params.cronSession.store[params.runSessionKey] = persistedEntry;
+    }
     await params.updateSessionStore(params.cronSession.storePath, (store) => {
       store[params.agentSessionKey] = persistedEntry;
+      if (params.runSessionKey && params.runSessionKey !== params.agentSessionKey) {
+        store[params.runSessionKey] = persistedEntry;
+      }
     });
   };
 }
