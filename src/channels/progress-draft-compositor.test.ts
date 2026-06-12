@@ -1,6 +1,7 @@
 // Progress draft compositor tests cover streamed draft composition for channel progress updates.
 import { describe, expect, it, vi } from "vitest";
 import { createChannelProgressDraftCompositor } from "./progress-draft-compositor.js";
+import { DEFAULT_PROGRESS_DRAFT_INITIAL_DELAY_MS } from "./streaming.js";
 
 describe("createChannelProgressDraftCompositor", () => {
   it("keeps the progress label visible when tool lines are hidden", async () => {
@@ -156,5 +157,37 @@ describe("createChannelProgressDraftCompositor", () => {
     await progress.pushReasoningProgress("Thinking\n\n_Reading files_");
 
     expect(update).toHaveBeenLastCalledWith("Shelling\n\n🛠️ Exec\n• _Reading files_", undefined);
+  });
+
+  it("logs a timer-fired start failure via the gate's default boundary logger", async () => {
+    vi.useFakeTimers();
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      // The compositor builds the gate without an onStartError, so the failure must be
+      // observed by the gate's default boundary reporter rather than silently dropped.
+      const update = vi.fn().mockRejectedValue(new Error("send failed"));
+      const progress = createChannelProgressDraftCompositor({
+        entry: { streaming: { mode: "progress", progress: { label: "Shelling" } } },
+        mode: "progress",
+        active: true,
+        seed: "test",
+        update,
+      });
+
+      // A single work event schedules the delayed start timer (no startImmediately).
+      await progress.pushToolProgress("🛠️ Exec");
+      expect(warn).not.toHaveBeenCalled();
+
+      // Firing the timer runs onStart -> render -> update(), which rejects.
+      await vi.advanceTimersByTimeAsync(DEFAULT_PROGRESS_DRAFT_INITIAL_DELAY_MS);
+
+      expect(update).toHaveBeenCalled();
+      expect(warn).toHaveBeenCalledWith(
+        expect.stringContaining("channel progress draft failed to start"),
+      );
+    } finally {
+      vi.useRealTimers();
+      warn.mockRestore();
+    }
   });
 });
