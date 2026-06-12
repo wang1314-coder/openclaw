@@ -21,7 +21,7 @@ const BYTE_UNITS = ["B", "KiB", "MiB", "GiB", "TiB"] as const;
 
 const log = createSubsystemLogger("gateway").child("diagnostics/memory");
 
-type DiagnosticMemoryThresholds = {
+export type DiagnosticMemoryThresholds = {
   rssWarningBytes?: number;
   rssCriticalBytes?: number;
   heapUsedWarningBytes?: number;
