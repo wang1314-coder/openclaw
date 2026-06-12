@@ -673,6 +673,7 @@ export function buildAgentSystemPrompt(params: {
   defaultThinkLevel?: ThinkLevel;
   reasoningLevel?: ReasoningLevel;
   extraSystemPrompt?: string;
+  extraSystemPromptDirective?: string;
   ownerNumbers?: string[];
   ownerDisplay?: OwnerIdDisplay;
   ownerDisplaySecret?: string;
@@ -861,6 +862,7 @@ export function buildAgentSystemPrompt(params: {
   const execToolName = resolveToolName("exec");
   const processToolName = resolveToolName("process");
   const extraSystemPrompt = params.extraSystemPrompt?.trim();
+  const extraSystemPromptDirective = params.extraSystemPromptDirective?.trim();
   const promptContribution = params.promptContribution;
   const providerStablePrefix = normalizeProviderPromptBlock(promptContribution?.stablePrefix);
   const providerDynamicSuffix = normalizeProviderPromptBlock(promptContribution?.dynamicSuffix);
@@ -1325,6 +1327,16 @@ export function buildAgentSystemPrompt(params: {
     ...buildActiveProcessSessionReferenceLines(runtimeInfo?.activeProcessSessions),
     `Reasoning: ${reasoningLevel} (hidden unless on/stream). Toggle /reasoning; /status shows Reasoning when enabled.`,
   );
+  if (extraSystemPromptDirective) {
+    lines.push(
+      "",
+      "## Active Directive (overrides persona for this turn)",
+      "Instructions in this block supersede the persona defined in SOUL.md and Project Context for this turn only. Where they conflict, follow this block.",
+      "",
+      extraSystemPromptDirective,
+      "",
+    );
+  }
 
   return lines.filter(Boolean).join("\n");
 }
