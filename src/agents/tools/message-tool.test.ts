@@ -223,6 +223,7 @@ vi.mock("./image-tool.js", () => ({
   createImageTool: () => null,
 }));
 vi.mock("./manifest-capability-availability.js", () => ({
+  getCurrentCapabilityMetadataSnapshot: () => undefined,
   hasSnapshotCapabilityAvailability: () => false,
   hasSnapshotProviderEnvAvailability: () => false,
   loadCapabilityMetadataSnapshot: () => ({ index: {}, plugins: [] }),
