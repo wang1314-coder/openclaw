@@ -832,7 +832,7 @@ export class EmbeddedTuiBackend implements TuiBackend {
     });
   }
 
-  private emitChatAborted(runId: string, run: LocalRunState) {
+  private emitChatAborted(runId: string, run: LocalRunState, errorMessage?: string) {
     this.clearPendingLifecycleError(runId);
     run.markQueuedRunReady();
     const alreadyFinal = run.finalSent;
@@ -848,6 +848,7 @@ export class EmbeddedTuiBackend implements TuiBackend {
       runId,
       sessionKey: run.sessionKey,
       state: "aborted",
+      ...(errorMessage ? { errorMessage } : {}),
     });
   }
 
@@ -960,7 +961,8 @@ export class EmbeddedTuiBackend implements TuiBackend {
     if (phase === "error") {
       run.finishing = false;
       if (aborted) {
-        this.emitChatAborted(evt.runId, run);
+        const errorMessage = typeof evt.data?.error === "string" ? evt.data.error : undefined;
+        this.emitChatAborted(evt.runId, run, errorMessage);
         return;
       }
       const errorMessage = typeof evt.data?.error === "string" ? evt.data.error : undefined;
