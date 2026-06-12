@@ -4,7 +4,9 @@
     "onStartup": false
   },
   "enabledByDefault": true,
-  "providers": ["anthropic"],
+  "providers": [
+    "anthropic"
+  ],
   "providerCatalogEntry": "./provider-discovery.ts",
   "modelCatalog": {
     "runtimeAugment": true,
@@ -26,9 +28,16 @@
             "id": "claude-opus-4-7",
             "name": "Claude Opus 4.7 (Claude CLI)",
             "reasoning": true,
-            "input": ["text", "image"],
+            "input": [
+              "text",
+              "image"
+            ],
             "mediaInput": {
-              "image": { "maxSidePx": 2576, "preferredSidePx": 2576, "tokenMode": "provider" }
+              "image": {
+                "maxSidePx": 2576,
+                "preferredSidePx": 2576,
+                "tokenMode": "provider"
+              }
             },
             "contextWindow": 200000,
             "maxTokens": 64000
@@ -37,9 +46,16 @@
             "id": "claude-sonnet-4-6",
             "name": "Claude Sonnet 4.6 (Claude CLI)",
             "reasoning": true,
-            "input": ["text", "image"],
+            "input": [
+              "text",
+              "image"
+            ],
             "mediaInput": {
-              "image": { "maxSidePx": 1568, "preferredSidePx": 1568, "tokenMode": "provider" }
+              "image": {
+                "maxSidePx": 1568,
+                "preferredSidePx": 1568,
+                "tokenMode": "provider"
+              }
             },
             "contextWindow": 200000,
             "maxTokens": 64000
@@ -48,9 +64,34 @@
             "id": "claude-opus-4-6",
             "name": "Claude Opus 4.6 (Claude CLI)",
             "reasoning": true,
-            "input": ["text", "image"],
+            "input": [
+              "text",
+              "image"
+            ],
             "mediaInput": {
-              "image": { "maxSidePx": 1568, "preferredSidePx": 1568, "tokenMode": "provider" }
+              "image": {
+                "maxSidePx": 1568,
+                "preferredSidePx": 1568,
+                "tokenMode": "provider"
+              }
+            },
+            "contextWindow": 200000,
+            "maxTokens": 64000
+          },
+          {
+            "id": "claude-haiku-4-5-20251001",
+            "name": "Claude Haiku 4.5 (Claude CLI)",
+            "reasoning": true,
+            "input": [
+              "text",
+              "image"
+            ],
+            "mediaInput": {
+              "image": {
+                "maxSidePx": 1568,
+                "preferredSidePx": 1568,
+                "tokenMode": "provider"
+              }
             },
             "contextWindow": 200000,
             "maxTokens": 64000
@@ -94,9 +135,16 @@
             "id": "claude-opus-4-7",
             "name": "Claude Opus 4.7",
             "reasoning": true,
-            "input": ["text", "image"],
+            "input": [
+              "text",
+              "image"
+            ],
             "mediaInput": {
-              "image": { "maxSidePx": 2576, "preferredSidePx": 2576, "tokenMode": "provider" }
+              "image": {
+                "maxSidePx": 2576,
+                "preferredSidePx": 2576,
+                "tokenMode": "provider"
+              }
             },
             "contextWindow": 200000,
             "maxTokens": 64000
@@ -105,9 +153,16 @@
             "id": "claude-sonnet-4-6",
             "name": "Claude Sonnet 4.6",
             "reasoning": true,
-            "input": ["text", "image"],
+            "input": [
+              "text",
+              "image"
+            ],
             "mediaInput": {
-              "image": { "maxSidePx": 1568, "preferredSidePx": 1568, "tokenMode": "provider" }
+              "image": {
+                "maxSidePx": 1568,
+                "preferredSidePx": 1568,
+                "tokenMode": "provider"
+              }
             },
             "contextWindow": 200000,
             "maxTokens": 64000
@@ -116,9 +171,34 @@
             "id": "claude-opus-4-6",
             "name": "Claude Opus 4.6",
             "reasoning": true,
-            "input": ["text", "image"],
+            "input": [
+              "text",
+              "image"
+            ],
             "mediaInput": {
-              "image": { "maxSidePx": 1568, "preferredSidePx": 1568, "tokenMode": "provider" }
+              "image": {
+                "maxSidePx": 1568,
+                "preferredSidePx": 1568,
+                "tokenMode": "provider"
+              }
+            },
+            "contextWindow": 200000,
+            "maxTokens": 64000
+          },
+          {
+            "id": "claude-haiku-4-5-20251001",
+            "name": "Claude Haiku 4.5",
+            "reasoning": true,
+            "input": [
+              "text",
+              "image"
+            ],
+            "mediaInput": {
+              "image": {
+                "maxSidePx": 1568,
+                "preferredSidePx": 1568,
+                "tokenMode": "provider"
+              }
             },
             "contextWindow": 200000,
             "maxTokens": 64000
@@ -132,7 +212,9 @@
     }
   },
   "modelSupport": {
-    "modelPrefixes": ["claude-"]
+    "modelPrefixes": [
+      "claude-"
+    ]
   },
   "modelIdNormalization": {
     "providers": {
@@ -150,7 +232,9 @@
     "providers": {
       "anthropic": {
         "openRouter": {
-          "modelIdTransforms": ["version-dots"]
+          "modelIdTransforms": [
+            "version-dots"
+          ]
         }
       }
     }
@@ -158,7 +242,9 @@
   "providerEndpoints": [
     {
       "endpointClass": "anthropic-public",
-      "hosts": ["api.anthropic.com"]
+      "hosts": [
+        "api.anthropic.com"
+      ]
     }
   ],
   "providerRequest": {
@@ -168,13 +254,20 @@
       }
     }
   },
-  "cliBackends": ["claude-cli"],
-  "syntheticAuthRefs": ["claude-cli"],
+  "cliBackends": [
+    "claude-cli"
+  ],
+  "syntheticAuthRefs": [
+    "claude-cli"
+  ],
   "setup": {
     "providers": [
       {
         "id": "anthropic",
-        "envVars": ["ANTHROPIC_OAUTH_TOKEN", "ANTHROPIC_API_KEY"]
+        "envVars": [
+          "ANTHROPIC_OAUTH_TOKEN",
+          "ANTHROPIC_API_KEY"
+        ]
       }
     ]
   },
@@ -183,7 +276,9 @@
       "provider": "anthropic",
       "method": "cli",
       "choiceId": "anthropic-cli",
-      "deprecatedChoiceIds": ["claude-cli"],
+      "deprecatedChoiceIds": [
+        "claude-cli"
+      ],
       "choiceLabel": "Anthropic Claude CLI",
       "choiceHint": "Reuse a local Claude CLI login on this host",
       "assistantPriority": -20,
@@ -220,18 +315,24 @@
     }
   ],
   "contracts": {
-    "mediaUnderstandingProviders": ["anthropic"]
+    "mediaUnderstandingProviders": [
+      "anthropic"
+    ]
   },
   "mediaUnderstandingProviderMetadata": {
     "anthropic": {
-      "capabilities": ["image"],
+      "capabilities": [
+        "image"
+      ],
       "defaultModels": {
         "image": "claude-opus-4-8"
       },
       "autoPriority": {
         "image": 20
       },
-      "nativeDocumentInputs": ["pdf"]
+      "nativeDocumentInputs": [
+        "pdf"
+      ]
     }
   },
   "configSchema": {
