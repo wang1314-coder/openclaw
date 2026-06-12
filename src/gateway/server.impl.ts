@@ -399,6 +399,7 @@ function createGatewayStartupTrace() {
         return result;
       } catch (error) {
         const now = performance.now();
+        eventLoopDelay?.disable();
         emitDiagnosticsTimelineEvent(
           {
             type: "span.error",
@@ -422,6 +423,9 @@ function createGatewayStartupTrace() {
         emitEventLoopTimelineSample(name, eventLoopSample);
         last = now;
       }
+    },
+    close() {
+      eventLoopDelay?.disable();
     },
   };
 }
@@ -1756,6 +1760,7 @@ export async function startGatewayServer(
       startupTrace.detail("memory.post-ready", collectGatewayProcessMemoryUsageMb());
     }
   } catch (err) {
+    startupTrace.close();
     await closeOnStartupFailure();
     throw err;
   }
