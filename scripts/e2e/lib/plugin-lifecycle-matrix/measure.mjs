@@ -168,7 +168,6 @@ const timeoutTimer =
           terminateChildGroup("SIGKILL");
           finish(124);
         }, timeoutKillGraceMs);
-        killTimer.unref?.();
       }, timeoutMs)
     : null;
 timeoutTimer?.unref?.();

@@ -247,6 +247,15 @@ async function writeTuiPtyFixtureScript(dir: string) {
           };
         }
 
+        async describeSession(key: string) {
+          return {
+            key,
+            sessionId: "pty-fixture-session",
+            displayName: "PTY Fixture Session",
+            updatedAt: Date.now(),
+          } as any;
+        }
+
         async listAgents() {
           return {
             defaultId: "main",

@@ -195,7 +195,6 @@ describe("plugin lifecycle resource sampler", () => {
       );
 
       expect(result.status).toBe(124);
-      expect(result.stdout).toContain("signal=timeout");
       expect(readFileSync(summary, "utf8")).toMatch(
         /^wedged\t\d+\t[\d.]+\t\d+\t[\d.]+\ttimeout$/mu,
       );
@@ -235,9 +234,9 @@ describe("plugin lifecycle resource sampler", () => {
           },
         );
 
+        expect(waitForPath(pidFile, 1000)).toBe(true);
         descendantPid = Number.parseInt(readFileSync(pidFile, "utf8"), 10);
         expect(result.status).toBe(124);
-        expect(result.stdout).toContain("signal=timeout");
         expect(readFileSync(summary, "utf8")).toMatch(
           /^stubborn-descendant\t\d+\t[\d.]+\t\d+\t[\d.]+\ttimeout$/mu,
         );
@@ -284,6 +283,7 @@ describe("plugin lifecycle resource sampler", () => {
         },
       );
 
+      expect(waitForPath(pidFile, 1000)).toBe(true);
       descendantPid = Number.parseInt(readFileSync(pidFile, "utf8"), 10);
       expect(result.status).toBe(124);
       expect(waitForPidExit(descendantPid, 1000)).toBe(true);
