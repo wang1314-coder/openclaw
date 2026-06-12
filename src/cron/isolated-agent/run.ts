@@ -18,7 +18,6 @@ import type { OpenClawConfig } from "../../config/types.openclaw.js";
 import { clearAgentRunContext } from "../../infra/agent-events.js";
 import { isDiagnosticsEnabled } from "../../infra/diagnostic-events.js";
 import {
-  createSourceDeliveryPlan,
   resolveSourceDeliveryOutcome,
   type SourceDeliveryOutcome,
   type SourceDeliveryPlan,
@@ -95,6 +94,7 @@ import {
 import type { RunCronAgentTurnResult } from "./run.types.js";
 import { resolveCronAgentSessionKey } from "./session-key.js";
 import { resolveCronSession } from "./session.js";
+import { resolveCronSourceDeliveryPlan } from "./source-delivery-fallback.js";
 
 const sessionStoreRuntimeLoader = createLazyImportLoader(
   () => import("../../config/sessions/store.runtime.js"),
@@ -296,48 +296,6 @@ function buildCronDeliveryTrace(params: {
     fallbackUsed: params.fallbackUsed,
     delivered: params.delivered,
   };
-}
-
-function resolveCronSourceDeliveryPlan(params: {
-  deliveryPlan: CronDeliveryPlan;
-  resolvedDelivery: ResolvedCronDeliveryTarget;
-}): SourceDeliveryPlan {
-  const target = {
-    channel: params.resolvedDelivery.channel,
-    to: params.resolvedDelivery.to,
-    accountId: params.resolvedDelivery.accountId,
-    threadId: params.resolvedDelivery.threadId,
-  };
-  if (params.deliveryPlan.mode === "webhook") {
-    // Webhook jobs do not expose chat delivery or message-tool fallback.
-    return createSourceDeliveryPlan({
-      owner: "none",
-      reason: "cron_webhook",
-      messageToolEnabled: false,
-      directFallback: false,
-    });
-  }
-  if (params.deliveryPlan.mode === "none") {
-    // delivery=none still allows explicit message-tool sends from the agent,
-    // but cron itself must not auto-announce a final reply.
-    return createSourceDeliveryPlan({
-      owner: "none",
-      reason: "cron_none",
-      target,
-      messageToolEnabled: true,
-      messageToolForced: false,
-      directFallback: false,
-    });
-  }
-  return createSourceDeliveryPlan({
-    owner: "direct_fallback",
-    reason: "cron_announce",
-    target,
-    messageToolEnabled: true,
-    messageToolForced: false,
-    directFallback: true,
-    skipFallbackWhenMessageToolSentToTarget: params.resolvedDelivery.ok,
-  });
 }
 
 function canPromptForMessageTool(params: {
