@@ -1,5 +1,6 @@
 // Control UI view renders skills screen content.
 import { html, nothing } from "lit";
+import { live } from "lit/directives/live.js";
 import { ref } from "lit/directives/ref.js";
 import { repeat } from "lit/directives/repeat.js";
 import { unsafeHTML } from "lit/directives/unsafe-html.js";
@@ -482,7 +483,7 @@ function renderSkill(skill: SkillStatusEntry, props: SkillsProps) {
           <input
             type="checkbox"
             class="skill-toggle"
-            .checked=${!skill.disabled}
+            .checked=${live(!skill.disabled)}
             ?disabled=${busy}
             @change=${(e: Event) => {
               e.stopPropagation();
