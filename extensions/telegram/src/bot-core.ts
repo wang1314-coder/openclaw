@@ -1,3 +1,7 @@
+import {
+  registerChannelMirrorDispatcher,
+  unregisterChannelMirrorDispatcher,
+} from "openclaw/plugin-sdk/channel-outbound";
 // Telegram plugin module implements bot core behavior.
 import {
   resolveChannelGroupPolicy,
@@ -398,6 +402,13 @@ export function createTelegramBotCore(
     telegramDeps,
   });
 
+  // Pin-from-here: re-home a mirrored turn onto THIS account through its own
+  // dispatch (drafts/streaming/persistence per this account's config). Keyed by
+  // accountId so a multi-account install mirrors through the target's own bot.
+  registerChannelMirrorDispatcher("telegram", account.accountId, ({ target, replyResolver }) =>
+    processMessage.dispatchMirror({ target, replyResolver }),
+  );
+
   registerTelegramNativeCommands({
     bot,
     cfg,
@@ -444,6 +455,9 @@ export function createTelegramBotCore(
   const originalStop = bot.stop.bind(bot);
   bot.stop = ((...args: Parameters<typeof originalStop>) => {
     threadBindingManager?.stop();
+    // Drop this account's mirror dispatcher so a stopped account never keeps a
+    // stale dispatcher (a reload re-registers a fresh one; a removal just clears it).
+    unregisterChannelMirrorDispatcher("telegram", account.accountId);
     return originalStop(...args);
   }) as typeof bot.stop;
 

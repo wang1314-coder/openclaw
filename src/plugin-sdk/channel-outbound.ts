@@ -48,6 +48,11 @@ export type { DraftStreamLoop } from "../channels/draft-stream-loop.js";
 export { resolveChannelDraftStreamingChunking } from "../channels/draft-streaming-chunking.js";
 export type { ChannelDraftStreamingChunking } from "../channels/draft-streaming-chunking.js";
 export { createRuntimeOutboundDelegates } from "../channels/plugins/runtime-forwarders.js";
+export {
+  registerChannelMirrorDispatcher,
+  unregisterChannelMirrorDispatcher,
+  type MirrorDispatcher,
+} from "../infra/outbound/mirror-dispatch.js";
 export { createChannelRunQueue } from "./channel-lifecycle.core.js";
 export type {
   ChannelRunQueue,
