@@ -8,7 +8,11 @@ import {
   createChannelTestPluginBase,
   createTestRegistry,
 } from "../../test-utils/channel-plugins.js";
-import { buildModelsProviderData, handleModelsCommand } from "./commands-models.js";
+import {
+  buildModelsProviderData,
+  handleModelsCommand,
+  resetModelsProviderDataCacheForTest,
+} from "./commands-models.js";
 import type { HandleCommandsParams } from "./commands-types.js";
 
 const modelCatalogMocks = vi.hoisted(() => ({
@@ -149,6 +153,7 @@ beforeAll(async () => {
 
 beforeEach(() => {
   setFastModelsCliBackendDeps();
+  resetModelsProviderDataCacheForTest();
   modelCatalogMocks.loadModelCatalog.mockReset();
   modelCatalogMocks.loadModelCatalog.mockResolvedValue([
     { provider: "anthropic", id: "claude-opus-4-5", name: "Claude Opus" },
@@ -873,4 +878,59 @@ describe("handleModelsCommand", () => {
       reply: { text: MODELS_ADD_DEPRECATED_TEXT },
     });
   });
+});
+
+it("reuses cached model-provider data for identical in-flight builds", async () => {
+  let resolveCatalog: ((value: Array<{ provider: string; id: string; name: string }>) => void) | undefined;
+  modelCatalogMocks.loadModelCatalog.mockReturnValue(
+    new Promise((resolve) => {
+      resolveCatalog = resolve;
+    }) as Promise<never>,
+  );
+
+  const cfg = {
+    agents: {
+      defaults: {
+        model: { primary: "anthropic/claude-opus-4-5" },
+      },
+    },
+  } as OpenClawConfig;
+
+  const first = buildModelsProviderData(cfg);
+  const second = buildModelsProviderData(cfg);
+
+  expect(modelCatalogMocks.loadModelCatalog).toHaveBeenCalledTimes(1);
+
+  resolveCatalog?.([{ provider: "anthropic", id: "claude-opus-4-5", name: "Claude Opus" }]);
+
+  await expect(first).resolves.toMatchObject({
+    providers: ["anthropic"],
+    resolvedDefault: { provider: "anthropic", model: "claude-opus-4-5" },
+  });
+  await expect(second).resolves.toMatchObject({
+    providers: ["anthropic"],
+    resolvedDefault: { provider: "anthropic", model: "claude-opus-4-5" },
+  });
+});
+
+it("misses the cache when runtime config fingerprint changes", async () => {
+  const cfgA = {
+    agents: {
+      defaults: {
+        model: { primary: "anthropic/claude-opus-4-5" },
+      },
+    },
+  } as OpenClawConfig;
+  const cfgB = {
+    agents: {
+      defaults: {
+        model: { primary: "anthropic/claude-sonnet-4-5" },
+      },
+    },
+  } as OpenClawConfig;
+
+  await buildModelsProviderData(cfgA);
+  await buildModelsProviderData(cfgB);
+
+  expect(modelCatalogMocks.loadModelCatalog).toHaveBeenCalledTimes(2);
 });

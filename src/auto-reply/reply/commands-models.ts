@@ -34,6 +34,7 @@ import { resolveDefaultAgentWorkspaceDir } from "../../agents/workspace.js";
 import { getChannelPlugin } from "../../channels/plugins/index.js";
 import type { SessionEntry } from "../../config/sessions.js";
 import type { OpenClawConfig } from "../../config/types.openclaw.js";
+import { resolveRuntimeConfigCacheKey } from "../../config/runtime-snapshot.js";
 import { resolveAgentRuntimeLabel } from "../../status/agent-runtime-label.js";
 import type { ReplyPayload } from "../types.js";
 import { rejectUnauthorizedCommand } from "./command-gates.js";
@@ -47,6 +48,10 @@ const MODELS_ADD_DEPRECATED_TEXT =
 type ModelsCommandSessionEntry = Partial<
   Pick<SessionEntry, "authProfileOverride" | "modelProvider" | "model">
 >;
+
+type ModelsProviderDataCacheEntry = {
+  promise: Promise<ModelsProviderData>;
+};
 
 export type ModelsProviderData = {
   byProvider: Map<string, Set<string>>;
@@ -146,7 +151,31 @@ function addRuntimeChoice(
   return choices;
 }
 
-export async function buildModelsProviderData(
+const modelsProviderDataCache = new Map<string, ModelsProviderDataCacheEntry>();
+
+export function resetModelsProviderDataCacheForTest(): void {
+  modelsProviderDataCache.clear();
+}
+
+function resolveModelsProviderDataCacheKey(params: {
+  cfg: OpenClawConfig;
+  agentId?: string;
+  workspaceDir?: string;
+  view?: "default" | "all";
+}): string {
+  const workspaceDir =
+    params.workspaceDir ??
+    (params.agentId ? resolveAgentWorkspaceDir(params.cfg, params.agentId) : undefined) ??
+    resolveDefaultAgentWorkspaceDir();
+  return [
+    resolveRuntimeConfigCacheKey(params.cfg),
+    params.agentId ?? "",
+    workspaceDir,
+    params.view ?? "default",
+  ].join("\u0000");
+}
+
+async function buildModelsProviderDataUncached(
   cfg: OpenClawConfig,
   agentId?: string,
   options: { view?: "default" | "all"; workspaceDir?: string } = {},
@@ -337,6 +366,33 @@ export async function buildModelsProviderData(
   }
 
   return { byProvider, providers, resolvedDefault, modelNames, runtimeChoicesByProvider };
+}
+
+export async function buildModelsProviderData(
+  cfg: OpenClawConfig,
+  agentId?: string,
+  options: { view?: "default" | "all"; workspaceDir?: string } = {},
+): Promise<ModelsProviderData> {
+  const cacheKey = resolveModelsProviderDataCacheKey({
+    cfg,
+    agentId,
+    workspaceDir: options.workspaceDir,
+    view: options.view,
+  });
+  const cached = modelsProviderDataCache.get(cacheKey);
+  if (cached) {
+    return cached.promise;
+  }
+
+  let promise: Promise<ModelsProviderData>;
+  promise = buildModelsProviderDataUncached(cfg, agentId, options).catch((error: unknown) => {
+    if (modelsProviderDataCache.get(cacheKey)?.promise === promise) {
+      modelsProviderDataCache.delete(cacheKey);
+    }
+    throw error;
+  });
+  modelsProviderDataCache.set(cacheKey, { promise });
+  return promise;
 }
 
 function formatProviderLine(params: { provider: string; count: number }): string {
