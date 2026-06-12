@@ -3329,6 +3329,7 @@ export async function runEmbeddedAttempt(
               requiresCompletionRequiredAsyncTaskWait({
                 sessionKey: params.sessionKey,
                 toolMetas: toolMetasForTerminal,
+                yieldDetected,
               })
             ) {
               return;
@@ -4573,6 +4574,7 @@ export async function runEmbeddedAttempt(
           requiresCompletionRequiredAsyncTaskWait({
             sessionKey: params.sessionKey,
             toolMetas,
+            yieldDetected,
           })
         ) {
           const getAsyncStartedToolMetas = () =>
