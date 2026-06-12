@@ -44,9 +44,22 @@ export function parseBooleanValue(
   }
   const truthy = options.truthy ?? DEFAULT_TRUTHY;
   const falsy = options.falsy ?? DEFAULT_FALSY;
-  // Reuse default sets on hot paths; custom literals get per-call sets to keep caller state immutable.
-  const truthySet = truthy === DEFAULT_TRUTHY ? DEFAULT_TRUTHY_SET : new Set(truthy);
-  const falsySet = falsy === DEFAULT_FALSY ? DEFAULT_FALSY_SET : new Set(falsy);
+  const truthySet =
+    truthy === DEFAULT_TRUTHY
+      ? DEFAULT_TRUTHY_SET
+      : new Set(
+            ? truthy
+                .filter((s): s is string => typeof s === "string")
+                .map((s) => s.toLowerCase())
+        );
+  const falsySet =
+    falsy === DEFAULT_FALSY
+      ? DEFAULT_FALSY_SET
+      : new Set(
+          Array.isArray(falsy)
+            ? falsy.map((s) => (typeof s === "string" ? s.toLowerCase() : s))
+            : [],
+        );
   if (truthySet.has(normalized)) {
     return true;
   }
