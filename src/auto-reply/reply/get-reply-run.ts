@@ -1221,6 +1221,9 @@ export async function runPreparedReply(
           // is identical whether this turn is sent as the current turn or
           // replayed as history. See: https://github.com/openclaw/openclaw/issues/3658
           ...(userTurnTimestamp ? { timestamp: userTurnTimestamp } : {}),
+          senderId: normalizeOptionalString(sessionCtx.SenderId),
+          senderName: normalizeOptionalString(sessionCtx.SenderName),
+          senderUsername: normalizeOptionalString(sessionCtx.SenderUsername),
         }
       : undefined;
   const userTurnTranscriptRecorder =
