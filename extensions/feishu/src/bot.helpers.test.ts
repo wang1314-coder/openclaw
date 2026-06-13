@@ -89,6 +89,26 @@ describe("parseMessageContent media placeholders", () => {
   });
 });
 
+describe("parseMessageContent interactive cards", () => {
+  it("does not treat Feishu client-upgrade fallback as recovered card content", () => {
+    expect(
+      parseMessageContent(
+        JSON.stringify({
+          title: "saber",
+          elements: [
+            [
+              { tag: "img", image_key: "img_v3" },
+              { tag: "text", text: "请升级至最新版本客户端，以查看内容" },
+              { tag: "text", text: "" },
+            ],
+          ],
+        }),
+        "interactive",
+      ),
+    ).toBe("[Interactive Card]");
+  });
+});
+
 describe("resolveBroadcastAgents", () => {
   it("returns agent list when broadcast config has the peerId", () => {
     const cfg: ClawdbotConfig = { broadcast: { oc_group123: ["susan", "main"] } };
