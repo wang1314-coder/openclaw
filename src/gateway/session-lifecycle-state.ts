@@ -165,7 +165,15 @@ export function deriveGatewaySessionLifecycleSnapshot(params: {
 export function derivePersistedSessionLifecyclePatch(params: {
   entry?: Partial<PersistedLifecycleSessionShape> | null;
   event: LifecycleEventLike;
-}): Partial<PersistedLifecycleSessionShape> {
+}): Partial<PersistedLifecycleSessionShape> | null {
+  if (
+    isStaleLifecycleEventForRunGeneration({
+      eventStartedAt: params.event.data?.startedAt,
+      currentStartedAt: params.entry?.startedAt,
+    })
+  ) {
+    return null;
+  }
   const snapshot = deriveGatewaySessionLifecycleSnapshot({
     session: params.entry ?? undefined,
     event: params.event,
@@ -189,6 +197,22 @@ export function isStaleLifecycleEventForSession(params: {
     params.owningSessionId &&
     params.currentSessionId &&
     params.owningSessionId !== params.currentSessionId,
+  );
+}
+
+/**
+ * Consecutive runs reuse a sessionId, so session identity alone cannot reject a
+ * late lifecycle end from the previous run. A row that already has a newer
+ * startedAt owns a newer run generation and must not be terminalized.
+ */
+export function isStaleLifecycleEventForRunGeneration(params: {
+  eventStartedAt?: unknown;
+  currentStartedAt?: unknown;
+}): boolean {
+  return (
+    isFiniteTimestamp(params.eventStartedAt) &&
+    isFiniteTimestamp(params.currentStartedAt) &&
+    params.currentStartedAt > params.eventStartedAt
   );
 }
 

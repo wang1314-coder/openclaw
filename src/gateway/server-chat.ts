@@ -30,6 +30,7 @@ import { loadGatewaySessionRow } from "./server-chat.load-gateway-session-row.ru
 import { persistGatewaySessionLifecycleEvent } from "./server-chat.persist-session-lifecycle.runtime.js";
 import {
   deriveGatewaySessionLifecycleSnapshot,
+  isStaleLifecycleEventForRunGeneration,
   isStaleLifecycleEventForSession,
 } from "./session-lifecycle-state.js";
 import { loadSessionEntry } from "./session-utils.js";
@@ -301,6 +302,7 @@ export function createAgentEventHandler({
   };
 
   const pendingTerminalLifecycleErrors = new Map<string, PendingTerminalLifecycleError>();
+  const lifecycleStartedAtByRunId = new Map<string, number>();
 
   type AgentTextThrottleStream = "assistant" | "thinking";
 
@@ -324,6 +326,34 @@ export function createAgentEventHandler({
     }
     clearTimeout(pending.timer);
     pendingTerminalLifecycleErrors.delete(runId);
+  };
+
+  const finiteLifecycleTimestamp = (value: unknown): number | undefined =>
+    typeof value === "number" && Number.isFinite(value) && value > 0 ? value : undefined;
+
+  const trackLifecycleStart = (evt: AgentEventPayload) => {
+    const startedAt =
+      finiteLifecycleTimestamp(evt.data?.startedAt) ??
+      finiteLifecycleTimestamp(evt.ts) ??
+      Date.now();
+    lifecycleStartedAtByRunId.set(evt.runId, startedAt);
+  };
+
+  const lifecycleEventWithStartedAt = (evt: AgentEventPayload): AgentEventPayload => {
+    if (finiteLifecycleTimestamp(evt.data?.startedAt) !== undefined) {
+      return evt;
+    }
+    const startedAt = lifecycleStartedAtByRunId.get(evt.runId);
+    if (startedAt === undefined) {
+      return evt;
+    }
+    return {
+      ...evt,
+      data: {
+        ...evt.data,
+        startedAt,
+      },
+    };
   };
 
   // Only subagent/acp keys can carry spawnedBy (mirrors supportsSpawnLineage in
@@ -363,6 +393,10 @@ export function createAgentEventHandler({
       !isStaleLifecycleEventForSession({
         owningSessionId: evt.sessionId,
         currentSessionId: row?.sessionId,
+      }) &&
+      !isStaleLifecycleEventForRunGeneration({
+        eventStartedAt: evt.data?.startedAt,
+        currentStartedAt: row?.startedAt,
       })
         ? deriveGatewaySessionLifecycleSnapshot({
             session: row
@@ -501,6 +535,7 @@ export function createAgentEventHandler({
     }
 
     clearPendingTerminalLifecycleError(evt.runId);
+    const lifecycleEvent = lifecycleEventWithStartedAt(evt);
 
     const chatLink = chatRunState.registry.peek(evt.runId);
     const sessionAgentId = chatLink?.agentId ?? evt.agentId;
@@ -574,6 +609,7 @@ export function createAgentEventHandler({
     toolEventRecipients.markFinal(evt.runId);
     clearBufferedChatState(clientRunId);
     clearAgentRunContext(evt.runId);
+    lifecycleStartedAtByRunId.delete(evt.runId);
     agentRunSeq.delete(evt.runId);
     agentRunSeq.delete(clientRunId);
 
@@ -582,7 +618,7 @@ export function createAgentEventHandler({
       void persistGatewaySessionLifecycleEvent({
         sessionKey,
         agentId: sessionAgentId,
-        event: evt,
+        event: lifecycleEvent,
       }).catch(() => undefined);
       const sessionEventConnIds = sessionEventSubscribers.getAll();
       if (sessionEventConnIds.size > 0) {
@@ -595,7 +631,7 @@ export function createAgentEventHandler({
             runId: evt.runId,
             ...(eventRunId !== evt.runId ? { clientRunId: eventRunId } : {}),
             ts: evt.ts,
-            ...buildSessionEventSnapshot(sessionKey, evt, sessionAgentId),
+            ...buildSessionEventSnapshot(sessionKey, lifecycleEvent, sessionAgentId),
           },
           sessionEventConnIds,
           { dropIfSlow: true },
@@ -1276,6 +1312,7 @@ export function createAgentEventHandler({
     }
 
     if (sessionKey && lifecyclePhase === "start") {
+      trackLifecycleStart(evt);
       void persistGatewaySessionLifecycleEvent({
         sessionKey,
         agentId: sessionAgentId,
