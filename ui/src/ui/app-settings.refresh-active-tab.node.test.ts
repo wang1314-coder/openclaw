@@ -55,6 +55,7 @@ const mocks = vi.hoisted(() => ({
   loadSkillsMock: vi.fn(async () => {}),
   loadUsageMock: vi.fn(async () => {}),
   loadWorkboardMock: vi.fn(async () => {}),
+  stopWorkboardPollingMock: vi.fn(),
   startDebugPollingMock: vi.fn(),
   startLogsPollingMock: vi.fn(),
   startNodesPollingMock: vi.fn(),
@@ -142,6 +143,7 @@ vi.mock("./controllers/usage.ts", () => ({
 }));
 vi.mock("./controllers/workboard.ts", () => ({
   loadWorkboard: mocks.loadWorkboardMock,
+  stopWorkboardPolling: mocks.stopWorkboardPollingMock,
 }));
 
 import { loadChannelsTab, refreshActiveTab, setTab } from "./app-settings.ts";
@@ -168,6 +170,7 @@ function createHost() {
     sessionsChangedReloadTimer: null as number | ReturnType<typeof globalThis.setTimeout> | null,
     sessionKey: "main",
     selectedAgentId: null as string | null,
+    hello: null as { auth?: { role?: string; scopes?: string[] } } | null,
     settings: {},
     basePath: "",
   };
@@ -356,13 +359,30 @@ describe("refreshActiveTab", () => {
       client: host.client,
       force: true,
       requestUpdate: host.requestUpdate,
+      refreshDiagnostics: true,
     });
   });
 
-  it("starts node polling on Nodes tab entry and clears pending session reloads on tab changes", () => {
+  it("keeps read-only Workboard tab preload on the read refresh path", async () => {
+    const host = createHost();
+    host.tab = "workboard";
+    host.hello = { auth: { role: "operator", scopes: ["operator.read"] } };
+
+    await refreshActiveTab(host as never);
+
+    expect(mocks.loadWorkboardMock).toHaveBeenCalledWith({
+      host,
+      client: host.client,
+      force: true,
+      requestUpdate: host.requestUpdate,
+      refreshDiagnostics: false,
+    });
+  });
+
+  it("starts node polling and stops inactive tab pollers on tab changes", () => {
     vi.useFakeTimers();
     const host = createHost();
-    host.tab = "overview";
+    host.tab = "workboard";
     const pendingReload = vi.fn();
     host.sessionsChangedReloadTimer = globalThis.setTimeout(() => pendingReload(), 1_000);
 
@@ -372,6 +392,7 @@ describe("refreshActiveTab", () => {
     expect(mocks.startNodesPollingMock).toHaveBeenCalledWith(host);
     expect(mocks.stopLogsPollingMock).toHaveBeenCalledWith(host);
     expect(mocks.stopDebugPollingMock).toHaveBeenCalledWith(host);
+    expect(mocks.stopWorkboardPollingMock).toHaveBeenCalledWith(host);
     vi.advanceTimersByTime(1_000);
     expect(pendingReload).not.toHaveBeenCalled();
 
