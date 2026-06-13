@@ -463,8 +463,10 @@ import {
   shouldPreemptivelyCompactBeforePrompt,
 } from "./preemptive-compaction.js";
 import {
+  appendRuntimeSelfContextForPromptSplit,
   buildCurrentInboundPrompt,
   buildRuntimeContextCustomMessage,
+  RUNTIME_SELF_CONTEXT_TOOL_NAME,
   resolveRuntimeContextPromptParts,
 } from "./runtime-context-prompt.js";
 import type { EmbeddedRunAttemptParams, EmbeddedRunAttemptResult } from "./types.js";
@@ -1660,6 +1662,9 @@ export async function runEmbeddedAttempt(
       sessionId: params.sessionId,
     });
     effectiveTools = [...toolSearchSchemaProjection.tools];
+    const runtimeSelfContextToolAvailable = effectiveTools.some(
+      (tool) => tool.name === RUNTIME_SELF_CONTEXT_TOOL_NAME,
+    );
     if (toolSearch.compacted && !toolSearch.catalogReused) {
       prepStages.mark(codeModeControlsEnabledForRun ? "code-mode" : "tool-search");
       log.info(
@@ -3869,6 +3874,14 @@ export async function runEmbeddedAttempt(
             promptForRuntimeContextSplit,
             params.inputProvenance,
           );
+          const runtimePromptSplit = appendRuntimeSelfContextForPromptSplit({
+            prompt: promptForRuntimeContextSplit,
+            transcriptPrompt: transcriptPromptForRuntimeSplit,
+            config: params.config ?? getRuntimeConfig(),
+            runtimeToolAvailable: runtimeSelfContextToolAvailable,
+          });
+          promptForRuntimeContextSplit = runtimePromptSplit.prompt;
+          transcriptPromptForRuntimeSplit = runtimePromptSplit.transcriptPrompt;
         }
         const transcriptLeafId =
           (sessionManager.getLeafEntry() as { id?: string } | null | undefined)?.id ?? null;
