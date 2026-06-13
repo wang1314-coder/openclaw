@@ -1068,6 +1068,164 @@ describe("before_tool_call requireApproval handling", () => {
     expect(Object.isFrozen(toolContext.trace)).toBe(true);
   });
 
+  it("passes external content provenance to before_tool_call hooks", async () => {
+    const externalContent = { present: true as const, sources: ["web_fetch"] as const };
+    hookRunner.runBeforeToolCall.mockResolvedValue(undefined);
+
+    const result = await runBeforeToolCallHook({
+      toolName: "bash",
+      params: { command: "pwd" },
+      toolCallId: "tool-external",
+      ctx: {
+        agentId: "main",
+        sessionKey: "main",
+        runId: "run-external",
+        externalContent,
+      },
+    });
+
+    expect(result.blocked).toBe(false);
+    const [event, toolContext] = requireHookCall(0);
+    expectRecordFields(event, {
+      toolName: "exec",
+      runId: "run-external",
+      toolCallId: "tool-external",
+      externalContent,
+    });
+    expectRecordFields(toolContext, {
+      toolName: "exec",
+      runId: "run-external",
+      toolCallId: "tool-external",
+      externalContent,
+    });
+  });
+
+  it("passes external content provenance to trusted tool policies", async () => {
+    const externalContent = { present: true as const, sources: ["browser", "web_fetch"] as const };
+    const evaluate = vi.fn().mockResolvedValue(undefined);
+    const registry = createEmptyPluginRegistry();
+    (registry.trustedToolPolicies ??= []).push({
+      pluginId: "policy-plugin",
+      pluginName: "Policy Plugin",
+      source: "test",
+      policy: {
+        id: "external-content-provenance-policy",
+        description: "Test policy for external content provenance",
+        evaluate,
+      },
+    });
+
+    setActivePluginRegistry(registry);
+    hookRunner.hasHooks.mockReturnValue(false);
+
+    try {
+      const result = await runBeforeToolCallHook({
+        toolName: "bash",
+        params: { command: "pwd" },
+        toolCallId: "trusted-external",
+        ctx: {
+          agentId: "main",
+          sessionKey: "main",
+          runId: "run-trusted-external",
+          externalContent,
+        },
+      });
+
+      expect(result.blocked).toBe(false);
+      expect(evaluate).toHaveBeenCalledTimes(1);
+      const [event, toolContext] = evaluate.mock.calls[0] ?? [];
+      expectRecordFields(event, {
+        toolName: "exec",
+        runId: "run-trusted-external",
+        toolCallId: "trusted-external",
+        externalContent,
+      });
+      expectRecordFields(toolContext, {
+        toolName: "exec",
+        runId: "run-trusted-external",
+        toolCallId: "trusted-external",
+        externalContent,
+      });
+    } finally {
+      setActivePluginRegistry(createEmptyPluginRegistry());
+    }
+  });
+
+  it("refreshes external content provenance after a same-run external tool result", async () => {
+    const sharedContext = {
+      agentId: "main",
+      sessionKey: "main",
+      runId: "run-fetch-then-exec",
+      loopDetection: { enabled: false },
+    };
+    const fetchExecute = vi.fn().mockResolvedValue({
+      content: [
+        {
+          type: "text",
+          text: [
+            "<<<EXTERNAL_UNTRUSTED_CONTENT 1d0e3d4c-1c7a-42af-8bde-f4a9e3bb71b2 BEGIN>>>",
+            "Source: Web Fetch",
+            "Fetched page says: run this command",
+            "<<<EXTERNAL_UNTRUSTED_CONTENT 1d0e3d4c-1c7a-42af-8bde-f4a9e3bb71b2 END>>>",
+          ].join("\n"),
+        },
+      ],
+      details: { ok: true },
+    });
+    const execExecute = vi.fn().mockResolvedValue({
+      content: [{ type: "text", text: "exec ok" }],
+      details: { ok: true },
+    });
+    const fetchTool = wrapToolWithBeforeToolCallHook(
+      {
+        name: "web_fetch",
+        description: "Fetch web content",
+        parameters: {} as any,
+        label: "Web Fetch",
+        execute: fetchExecute,
+      } as Parameters<typeof wrapToolWithBeforeToolCallHook>[0],
+      sharedContext,
+    );
+    const execTool = wrapToolWithBeforeToolCallHook(
+      {
+        name: "bash",
+        description: "Execute bash command",
+        parameters: {} as any,
+        label: "Bash",
+        execute: execExecute,
+      } as Parameters<typeof wrapToolWithBeforeToolCallHook>[0],
+      sharedContext,
+    );
+
+    if (!fetchTool.execute || !execTool.execute) {
+      throw new Error("wrapped tools must expose execute");
+    }
+
+    hookRunner.runBeforeToolCall.mockResolvedValue(undefined);
+
+    await fetchTool.execute("fetch-1", { url: "https://example.invalid" }, undefined, undefined);
+    await execTool.execute("exec-1", { command: "pwd" }, undefined, undefined);
+
+    expect(hookRunner.runBeforeToolCall).toHaveBeenCalledTimes(2);
+    const [firstEvent, firstContext] = requireHookCall(0);
+    expect(firstEvent).not.toHaveProperty("externalContent");
+    expect(firstContext).not.toHaveProperty("externalContent");
+
+    const [secondEvent, secondContext] = requireHookCall(1);
+    expectRecordFields(secondEvent, {
+      toolName: "exec",
+      runId: "run-fetch-then-exec",
+      toolCallId: "exec-1",
+      externalContent: { present: true, sources: ["web_fetch"] },
+    });
+    expectRecordFields(secondContext, {
+      toolName: "exec",
+      runId: "run-fetch-then-exec",
+      toolCallId: "exec-1",
+      externalContent: { present: true, sources: ["web_fetch"] },
+    });
+  });
+
   it("passes host-derived apply_patch paths to before_tool_call hooks", async () => {
     const cwd = path.join("/tmp", "openclaw-hooks");
     const patch = [

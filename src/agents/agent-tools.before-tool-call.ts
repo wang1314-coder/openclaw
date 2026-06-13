@@ -47,6 +47,7 @@ import {
   PluginApprovalResolutions,
   type PluginApprovalResolution,
   type PluginHookBeforeToolCallResult,
+  type PluginHookExternalContentProvenance,
   type PluginHookToolInputKind,
   type PluginHookToolKind,
 } from "../plugins/types.js";
@@ -107,6 +108,7 @@ export type HookContext = {
   runId?: string;
   trace?: DiagnosticTraceContext;
   channelId?: string;
+  externalContent?: PluginHookExternalContentProvenance;
   loopDetection?: ToolLoopDetectionConfig;
   onToolOutcome?: ToolOutcomeObserver;
   skillsSnapshot?: SkillSnapshot;
@@ -209,6 +211,131 @@ const BEFORE_TOOL_CALL_HOOK_FAILURE_REASON =
 const MAX_TRACKED_ADJUSTED_PARAMS = 1024;
 const LOOP_WARNING_BUCKET_SIZE = 10;
 const MAX_LOOP_WARNING_KEYS = 256;
+
+type ToolHookExternalContentSource = PluginHookExternalContentProvenance["sources"][number];
+
+const EXTERNAL_CONTENT_MARKER = "<<<EXTERNAL_UNTRUSTED_CONTENT";
+const EXTERNAL_CONTENT_SOURCE_ORDER: ToolHookExternalContentSource[] = [
+  "email",
+  "webhook",
+  "api",
+  "browser",
+  "channel_metadata",
+  "web_search",
+  "web_fetch",
+  "unknown",
+];
+
+const EXTERNAL_CONTENT_SOURCE_BY_LABEL = new Map<string, ToolHookExternalContentSource>([
+  ["email", "email"],
+  ["webhook", "webhook"],
+  ["api", "api"],
+  ["browser", "browser"],
+  ["channel metadata", "channel_metadata"],
+  ["web search", "web_search"],
+  ["web fetch", "web_fetch"],
+  ["external", "unknown"],
+]);
+
+function collectToolHookExternalContentSources(
+  value: unknown,
+  sources: Set<ToolHookExternalContentSource>,
+  seen = new Set<unknown>(),
+  depth = 0,
+): void {
+  if (value === null || value === undefined || depth > 8) {
+    return;
+  }
+
+  if (typeof value === "string") {
+    if (!value.includes(EXTERNAL_CONTENT_MARKER)) {
+      return;
+    }
+    sources.add("unknown");
+    for (const match of value.matchAll(/^Source:\s*([^\r\n]+)/gim)) {
+      const source = EXTERNAL_CONTENT_SOURCE_BY_LABEL.get(
+        match[1]?.trim().toLowerCase() ?? "",
+      );
+      if (source) {
+        sources.add(source);
+      }
+    }
+    if (sources.size > 1) {
+      sources.delete("unknown");
+    }
+    return;
+  }
+
+  if (typeof value !== "object") {
+    return;
+  }
+
+  if (seen.has(value)) {
+    return;
+  }
+  seen.add(value);
+
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      collectToolHookExternalContentSources(item, sources, seen, depth + 1);
+    }
+    return;
+  }
+
+  for (const item of Object.values(value as Record<string, unknown>)) {
+    collectToolHookExternalContentSources(item, sources, seen, depth + 1);
+  }
+}
+
+function detectToolHookExternalContentProvenance(
+  values: readonly unknown[],
+): PluginHookExternalContentProvenance | undefined {
+  const sources = new Set<ToolHookExternalContentSource>();
+  for (const value of values) {
+    collectToolHookExternalContentSources(value, sources);
+  }
+  if (sources.size === 0) {
+    return undefined;
+  }
+  return {
+    present: true,
+    sources: EXTERNAL_CONTENT_SOURCE_ORDER.filter((source) => sources.has(source)),
+  };
+}
+
+function mergeToolHookExternalContentProvenance(
+  left: PluginHookExternalContentProvenance | undefined,
+  right: PluginHookExternalContentProvenance | undefined,
+): PluginHookExternalContentProvenance | undefined {
+  if (!left) {
+    return right;
+  }
+  if (!right) {
+    return left;
+  }
+  const sources = new Set<ToolHookExternalContentSource>([...left.sources, ...right.sources]);
+  return {
+    present: true,
+    sources: EXTERNAL_CONTENT_SOURCE_ORDER.filter((source) => sources.has(source)),
+  };
+}
+
+function refreshHookContextExternalContentFromToolResult(
+  ctx: HookContext | undefined,
+  result: unknown,
+): void {
+  if (!ctx) {
+    return;
+  }
+  const resultExternalContent = detectToolHookExternalContentProvenance([result]);
+  if (!resultExternalContent) {
+    return;
+  }
+  ctx.externalContent = mergeToolHookExternalContentProvenance(
+    ctx.externalContent,
+    resultExternalContent,
+  );
+}
 
 /**
  * Error used when before_tool_call intentionally vetoes a tool call.
@@ -935,6 +1062,7 @@ export async function runBeforeToolCallHook(args: {
       ...(args.ctx?.trace && { trace: freezeDiagnosticTraceContext(args.ctx.trace) }),
       ...(args.toolCallId && { toolCallId: args.toolCallId }),
       ...(args.ctx?.channelId && { channelId: args.ctx.channelId }),
+      ...(args.ctx?.externalContent && { externalContent: args.ctx.externalContent }),
     });
     const toolContext = buildToolContext(toolIdentity);
     const trustedPolicyResult = shouldRunTrustedPolicies
@@ -945,6 +1073,7 @@ export async function runBeforeToolCallHook(args: {
             ...toolIdentity,
             ...(args.ctx?.runId && { runId: args.ctx.runId }),
             ...(args.toolCallId && { toolCallId: args.toolCallId }),
+            ...(args.ctx?.externalContent && { externalContent: args.ctx.externalContent }),
             ...(derivedToolParams.derivedPaths
               ? { derivedPaths: derivedToolParams.derivedPaths }
               : {}),
@@ -1051,6 +1180,7 @@ export async function runBeforeToolCallHook(args: {
         ...policyAdjustedToolIdentity,
         ...(args.ctx?.runId && { runId: args.ctx.runId }),
         ...(args.toolCallId && { toolCallId: args.toolCallId }),
+        ...(args.ctx?.externalContent && { externalContent: args.ctx.externalContent }),
         ...(policyAdjustedDerivedToolParams.derivedPaths
           ? { derivedPaths: policyAdjustedDerivedToolParams.derivedPaths }
           : {}),
@@ -1243,6 +1373,7 @@ export function wrapToolWithBeforeToolCallHook(
       const startedAt = Date.now();
       try {
         const result = await execute(toolCallId, executeParams, signal, onUpdate);
+        refreshHookContextExternalContentFromToolResult(ctx, result);
         const durationMs = Date.now() - startedAt;
         await recordLoopOutcome({
           ctx,
