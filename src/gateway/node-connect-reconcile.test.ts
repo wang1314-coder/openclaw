@@ -197,6 +197,26 @@ describe("reconcileNodePairingOnConnect", () => {
     expect(result.pendingPairing).toBeUndefined();
   });
 
+  it("defers stale pending reapproval cleanup when the node returns to its approved surface", async () => {
+    const requestPairing = makePendingPairingRequest("req-unused");
+
+    const result = await reconcileNodePairingOnConnect({
+      cfg: {} as never,
+      connectParams: makeNodeConnectParams({
+        caps: ["camera"],
+        commands: ["canvas.snapshot"],
+      }),
+      pairedNode: makePairedNode({
+        caps: ["camera"],
+        commands: ["canvas.snapshot"],
+      }),
+      requestPairing,
+    });
+
+    expect(requestPairing).not.toHaveBeenCalled();
+    expect(result.shouldClearPendingPairings).toBe(true);
+  });
+
   it("requires a fresh pairing request when paired node permissions change", async () => {
     const requestPairing = makePendingPairingRequest("req-permissions");
 

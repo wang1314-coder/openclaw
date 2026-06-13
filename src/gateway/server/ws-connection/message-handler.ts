@@ -68,8 +68,10 @@ import {
   runWithDiagnosticTraceContext,
 } from "../../../infra/diagnostic-trace-context.js";
 import {
-  getPairedNode,
+  getNodePairingConnectSnapshot,
+  rejectPendingNodePairingRequestsForNode,
   requestNodePairing,
+  type NodePairingPendingSnapshot,
   updatePairedNodeMetadata,
 } from "../../../infra/node-pairing.js";
 import { upsertPresence } from "../../../infra/system-presence.js";
@@ -1613,11 +1615,15 @@ export function attachGatewayWsMessageHandler(params: GatewayWsMessageHandlerPar
             });
           }
         }
+        let pendingNodePairingCleanup:
+          | { nodeId: string; observed: NodePairingPendingSnapshot[] }
+          | undefined;
         if (role === "node") {
-          let reconciliation: Awaited<ReturnType<typeof reconcileNodePairingOnConnect>>;
-          const pairedNode = await getPairedNode(
+          const nodePairingSnapshot = await getNodePairingConnectSnapshot(
             connectParams.device?.id ?? connectParams.client.id,
           );
+          const pairedNode = nodePairingSnapshot.pairedNode;
+          let reconciliation: Awaited<ReturnType<typeof reconcileNodePairingOnConnect>>;
           try {
             reconciliation = await reconcileNodePairingOnConnect({
               cfg: getRuntimeConfig(),
@@ -1653,10 +1659,19 @@ export function attachGatewayWsMessageHandler(params: GatewayWsMessageHandlerPar
             }
             throw error;
           }
-          if (reconciliation.pendingPairing?.created) {
+          if (reconciliation.shouldClearPendingPairings) {
+            pendingNodePairingCleanup = {
+              nodeId: reconciliation.nodeId,
+              observed: nodePairingSnapshot.pending,
+            };
+          }
+          const supersededPairings = reconciliation.pendingPairing?.created
+            ? (reconciliation.pendingPairing.superseded ?? [])
+            : [];
+          if (supersededPairings.length > 0 || reconciliation.pendingPairing?.created) {
             const requestContext = buildRequestContext();
             const resolvedAt = Date.now();
-            for (const superseded of reconciliation.pendingPairing.superseded ?? []) {
+            for (const superseded of supersededPairings) {
               requestContext.broadcast(
                 "node.pair.resolved",
                 {
@@ -1668,9 +1683,15 @@ export function attachGatewayWsMessageHandler(params: GatewayWsMessageHandlerPar
                 { dropIfSlow: true },
               );
             }
-            requestContext.broadcast("node.pair.requested", reconciliation.pendingPairing.request, {
-              dropIfSlow: true,
-            });
+            if (reconciliation.pendingPairing?.created) {
+              requestContext.broadcast(
+                "node.pair.requested",
+                reconciliation.pendingPairing.request,
+                {
+                  dropIfSlow: true,
+                },
+              );
+            }
           }
           const nodeConnectParams = connectParams as ConnectParams & {
             declaredCaps?: string[];
@@ -1977,6 +1998,35 @@ export function attachGatewayWsMessageHandler(params: GatewayWsMessageHandlerPar
           setCloseCause("hello-send-failed", { error: formatForLog(err) });
           close();
           return;
+        }
+        if (pendingNodePairingCleanup) {
+          const context = buildRequestContext();
+          // A newer overlapping reconnect may now own the node and its pending approval.
+          if (context.nodeRegistry.get(pendingNodePairingCleanup.nodeId)?.connId === connId) {
+            try {
+              const resolvedPairings = await rejectPendingNodePairingRequestsForNode(
+                pendingNodePairingCleanup.nodeId,
+                pendingNodePairingCleanup.observed,
+              );
+              const resolvedAt = Date.now();
+              for (const resolved of resolvedPairings) {
+                context.broadcast(
+                  "node.pair.resolved",
+                  {
+                    requestId: resolved.requestId,
+                    nodeId: resolved.nodeId,
+                    decision: "rejected",
+                    ts: resolvedAt,
+                  },
+                  { dropIfSlow: true },
+                );
+              }
+            } catch (error) {
+              logGateway.warn(
+                `failed to clear stale pending pairings for ${pendingNodePairingCleanup.nodeId}: ${formatForLog(error)}`,
+              );
+            }
+          }
         }
         logWs("out", "hello-ok", {
           connId,
