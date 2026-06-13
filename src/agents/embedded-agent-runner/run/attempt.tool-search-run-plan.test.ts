@@ -80,7 +80,7 @@ describe("buildToolSearchRunPlan", () => {
           },
         },
       ],
-      catalogRegistered: true,
+      clientToolsCataloged: true,
       catalogToolCount: 2,
       controlsEnabled: true,
       explicitAllowlistSources: [{ entries: ["missing_tool"] }],
@@ -93,6 +93,8 @@ describe("buildToolSearchRunPlan", () => {
       "fake_plugin_tool",
       "client_pick_file",
     ]);
+    expect(plan.liveAllowedToolNames).toBe(plan.visibleAllowedToolNames);
+    expect([...plan.capabilityToolNames]).toEqual(["tool_search_code"]);
     expect(plan.emptyAllowlistCallableNames).toEqual(["tool-search:0", "tool-search:1"]);
   });
 
@@ -109,7 +111,7 @@ describe("buildToolSearchRunPlan", () => {
           },
         },
       ],
-      catalogRegistered: true,
+      clientToolsCataloged: true,
       catalogToolCount: 0,
       controlsEnabled: true,
       explicitAllowlistSources: [{ entries: ["client_pick_file"] }],
@@ -123,7 +125,7 @@ describe("buildToolSearchRunPlan", () => {
       visibleTools: [{ name: "exec" }, { name: "wait" }] as never,
       uncompactedTools: [{ name: "fake_plugin_tool" }] as never,
       clientTools: [],
-      catalogRegistered: true,
+      clientToolsCataloged: true,
       catalogToolCount: 1,
       controlsEnabled: true,
       controlNames: ["exec", "wait"],
@@ -132,6 +134,7 @@ describe("buildToolSearchRunPlan", () => {
 
     expect([...plan.visibleAllowedToolNames]).toEqual(["exec", "wait"]);
     expect([...plan.replayAllowedToolNames]).toEqual(["fake_plugin_tool", "exec", "wait"]);
+    expect([...plan.capabilityToolNames]).toEqual(["exec", "wait"]);
     expect(plan.emptyAllowlistCallableNames).toEqual(["tool-search:0"]);
   });
 
@@ -148,12 +151,162 @@ describe("buildToolSearchRunPlan", () => {
           },
         },
       ],
-      catalogRegistered: true,
+      clientToolsCataloged: true,
       catalogToolCount: 0,
       controlsEnabled: true,
       explicitAllowlistSources: [{ entries: ["missing_tool"] }],
     });
 
     expect(plan.emptyAllowlistCallableNames).toEqual([]);
+  });
+
+  it("keeps uncataloged directory-mode client tools visible", () => {
+    const plan = buildToolSearchRunPlan({
+      visibleTools: [
+        { name: "tool_search" },
+        { name: "tool_describe" },
+        { name: "tool_call" },
+      ] as never,
+      uncompactedTools: [{ name: "fake_plugin_tool" }] as never,
+      clientTools: [
+        {
+          type: "function",
+          function: {
+            name: "client_pick_file",
+            parameters: { type: "object", properties: {} },
+          },
+        },
+      ],
+      clientToolsCataloged: false,
+      catalogToolCount: 1,
+      controlsEnabled: true,
+      deferredToolsCallable: true,
+      controlNames: ["tool_search", "tool_describe", "tool_call"],
+      explicitAllowlistSources: [{ entries: ["missing_tool"] }],
+    });
+
+    expect([...plan.visibleAllowedToolNames]).toEqual([
+      "tool_search",
+      "tool_describe",
+      "tool_call",
+      "client_pick_file",
+    ]);
+    expect([...plan.liveAllowedToolNames]).toEqual([
+      "fake_plugin_tool",
+      "tool_search",
+      "tool_describe",
+      "tool_call",
+      "client_pick_file",
+    ]);
+    expect([...plan.capabilityToolNames]).toEqual(["fake_plugin_tool"]);
+    expect(plan.emptyAllowlistCallableNames).toEqual(["tool-search:0"]);
+  });
+
+  it("does not let visible directory client tools mask a bad explicit allowlist", () => {
+    const plan = buildToolSearchRunPlan({
+      visibleTools: [
+        { name: "tool_search" },
+        { name: "tool_describe" },
+        { name: "tool_call" },
+      ] as never,
+      uncompactedTools: [],
+      clientTools: [
+        {
+          type: "function",
+          function: {
+            name: "client_pick_file",
+            parameters: { type: "object", properties: {} },
+          },
+        },
+      ],
+      clientToolsCataloged: false,
+      catalogToolCount: 0,
+      controlsEnabled: true,
+      deferredToolsCallable: true,
+      controlNames: ["tool_search", "tool_describe", "tool_call"],
+      explicitAllowlistSources: [{ entries: ["missing_tool"] }],
+    });
+
+    expect([...plan.visibleAllowedToolNames]).toContain("client_pick_file");
+    expect(plan.emptyAllowlistCallableNames).toEqual([]);
+  });
+
+  it("counts explicitly allowlisted visible directory client tools", () => {
+    const plan = buildToolSearchRunPlan({
+      visibleTools: [
+        { name: "tool_search" },
+        { name: "tool_describe" },
+        { name: "tool_call" },
+      ] as never,
+      uncompactedTools: [],
+      clientTools: [
+        {
+          type: "function",
+          function: {
+            name: "client_pick_file",
+            parameters: { type: "object", properties: {} },
+          },
+        },
+      ],
+      clientToolsCataloged: false,
+      catalogToolCount: 0,
+      controlsEnabled: true,
+      deferredToolsCallable: true,
+      controlNames: ["tool_search", "tool_describe", "tool_call"],
+      explicitAllowlistSources: [{ entries: ["client_pick_file"] }],
+    });
+
+    expect(plan.emptyAllowlistCallableNames).toEqual(["client_pick_file"]);
+  });
+
+  it("counts wildcard-allowlisted visible directory client tools", () => {
+    const plan = buildToolSearchRunPlan({
+      visibleTools: [
+        { name: "tool_search" },
+        { name: "tool_describe" },
+        { name: "tool_call" },
+      ] as never,
+      uncompactedTools: [],
+      clientTools: [
+        {
+          type: "function",
+          function: {
+            name: "client_pick_file",
+            parameters: { type: "object", properties: {} },
+          },
+        },
+      ],
+      clientToolsCataloged: false,
+      catalogToolCount: 0,
+      controlsEnabled: true,
+      deferredToolsCallable: true,
+      controlNames: ["tool_search", "tool_describe", "tool_call"],
+      explicitAllowlistSources: [{ entries: ["client_*"] }],
+    });
+
+    expect(plan.emptyAllowlistCallableNames).toEqual(["client_pick_file"]);
+  });
+
+  it("keeps client names out of OpenClaw capability guidance", () => {
+    const plan = buildToolSearchRunPlan({
+      visibleTools: [{ name: "fake_plugin_tool" }] as never,
+      uncompactedTools: [{ name: "fake_plugin_tool" }] as never,
+      clientTools: [
+        {
+          type: "function",
+          function: {
+            name: "sessions_spawn",
+            parameters: { type: "object", properties: {} },
+          },
+        },
+      ],
+      clientToolsCataloged: false,
+      catalogToolCount: 0,
+      controlsEnabled: false,
+      explicitAllowlistSources: [],
+    });
+
+    expect([...plan.liveAllowedToolNames]).toEqual(["fake_plugin_tool", "sessions_spawn"]);
+    expect([...plan.capabilityToolNames]).toEqual(["fake_plugin_tool"]);
   });
 });

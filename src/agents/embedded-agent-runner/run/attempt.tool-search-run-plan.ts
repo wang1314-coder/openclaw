@@ -1,6 +1,7 @@
 /**
  * Builds tool-search execution plans from allowlists and available controls.
  */
+import { isToolAllowedByPolicyName } from "../../tool-policy-match.js";
 import { normalizeToolName } from "../../tool-policy.js";
 import {
   TOOL_CALL_RAW_TOOL_NAME,
@@ -24,6 +25,8 @@ type CollectAllowedToolNamesParams = Parameters<typeof collectAllowedToolNames>[
 export type ToolSearchRunPlan = {
   visibleAllowedToolNames: Set<string>;
   replayAllowedToolNames: Set<string>;
+  liveAllowedToolNames: Set<string>;
+  capabilityToolNames: Set<string>;
   autoAddedControlNames?: Set<string>;
   emptyAllowlistCallableNames: string[];
 };
@@ -78,15 +81,14 @@ function collectExplicitlyAllowedClientToolNames(params: {
   clientTools?: CollectAllowedToolNamesParams["clientTools"];
   explicitAllowlistSources: Array<{ entries: string[] }>;
 }): string[] {
-  const explicitNames = new Set(
-    params.explicitAllowlistSources.flatMap((source) =>
-      source.entries.map((entry) => normalizeToolName(entry)),
-    ),
-  );
   return (params.clientTools ?? [])
     .map((tool) => tool.function?.name)
     .filter((name): name is string => Boolean(name?.trim()))
-    .filter((name) => explicitNames.has(normalizeToolName(name)));
+    .filter((name) =>
+      params.explicitAllowlistSources.some((source) =>
+        isToolAllowedByPolicyName(name, { allow: source.entries }),
+      ),
+    );
 }
 
 /**
@@ -98,19 +100,23 @@ export function buildToolSearchRunPlan(params: {
   visibleTools: CollectAllowedToolNamesParams["tools"];
   uncompactedTools: CollectAllowedToolNamesParams["tools"];
   clientTools?: CollectAllowedToolNamesParams["clientTools"];
-  catalogRegistered: boolean;
+  clientToolsCataloged: boolean;
   catalogToolCount: number;
   controlsEnabled: boolean;
+  deferredToolsCallable?: boolean;
   controlNames?: readonly string[];
   explicitAllowlistSources: Array<{ entries: string[] }>;
 }): ToolSearchRunPlan {
   const visibleAllowedToolNames = collectAllowedToolNames({
     tools: params.visibleTools,
-    clientTools: params.catalogRegistered ? undefined : params.clientTools,
+    clientTools: params.clientToolsCataloged ? undefined : params.clientTools,
   });
   const replayAllowedToolNames = collectAllowedToolNames({
     tools: params.uncompactedTools,
     clientTools: params.clientTools,
+  });
+  const capabilityToolNames = collectAllowedToolNames({
+    tools: params.deferredToolsCallable ? params.uncompactedTools : params.visibleTools,
   });
   if (params.controlsEnabled) {
     // A control that was visible in the compacted prompt must remain allowed
@@ -121,28 +127,51 @@ export function buildToolSearchRunPlan(params: {
       }
     }
   }
+  const liveAllowedToolNames = params.deferredToolsCallable
+    ? collectAllowedToolNames({ tools: params.uncompactedTools })
+    : visibleAllowedToolNames;
+  if (params.deferredToolsCallable) {
+    // Deferred resolution can hydrate catalog tools, but Tool Search controls
+    // excluded from the visible surface are not catalog entries.
+    for (const controlName of TOOL_SEARCH_CONTROL_ALLOWLIST_NAMES) {
+      if (!visibleAllowedToolNames.has(controlName)) {
+        liveAllowedToolNames.delete(controlName);
+      }
+    }
+    for (const visibleName of visibleAllowedToolNames) {
+      liveAllowedToolNames.add(visibleName);
+    }
+  }
   const autoAddedControlNames = buildAutoAddedToolSearchControlNamesForAllowlistCheck({
     toolSearchControlsEnabled: params.controlsEnabled,
     explicitAllowlistSources: params.explicitAllowlistSources,
     controlNames: params.controlNames,
   });
-  const clientCatalogCallableNames = params.catalogRegistered
-    ? collectExplicitlyAllowedClientToolNames({
-        clientTools: params.clientTools,
-        explicitAllowlistSources: params.explicitAllowlistSources,
-      }).map((name) => `tool-search-client:${name}`)
-    : [];
+  const explicitlyAllowedClientToolNames = collectExplicitlyAllowedClientToolNames({
+    clientTools: params.clientTools,
+    explicitAllowlistSources: params.explicitAllowlistSources,
+  });
+  const emptyAllowlistVisibleToolNames = params.deferredToolsCallable
+    ? collectAllowedToolNames({ tools: params.visibleTools })
+    : visibleAllowedToolNames;
+  const explicitClientCallableNames = params.clientToolsCataloged
+    ? explicitlyAllowedClientToolNames.map((name) => `tool-search-client:${name}`)
+    : params.deferredToolsCallable
+      ? explicitlyAllowedClientToolNames
+      : [];
   return {
     visibleAllowedToolNames,
     replayAllowedToolNames,
+    liveAllowedToolNames,
+    capabilityToolNames,
     autoAddedControlNames,
     emptyAllowlistCallableNames: [
       ...buildCallableToolNamesForEmptyAllowlistCheck({
-        effectiveToolNames: [...visibleAllowedToolNames],
+        effectiveToolNames: [...emptyAllowlistVisibleToolNames],
         autoAddedToolSearchControlNames: autoAddedControlNames,
         toolSearchCatalogToolCount: params.catalogToolCount,
       }),
-      ...clientCatalogCallableNames,
+      ...explicitClientCallableNames,
     ],
   };
 }
