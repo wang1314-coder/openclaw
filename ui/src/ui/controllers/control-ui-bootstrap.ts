@@ -24,6 +24,7 @@ export type ControlUiBootstrapState = {
   embedSandboxMode: ControlUiEmbedSandboxMode;
   allowExternalEmbedUrls: boolean;
   chatMessageMaxWidth?: string | null;
+  seamColor?: string | null;
   sessionKey?: string | null;
   hello?: { auth?: { deviceToken?: string | null } | null } | null;
   settings?: { token?: string | null } | null;
@@ -53,6 +54,54 @@ function applyLocalAssistantAvatarOverride(state: ControlUiBootstrapState) {
   state.assistantAvatarSource = localAvatar;
   state.assistantAvatarStatus = "data";
   state.assistantAvatarReason = null;
+}
+
+const SEAM_COLOR_CSS_VARS = [
+  "--accent",
+  "--accent-hover",
+  "--accent-muted",
+  "--accent-subtle",
+  "--accent-glow",
+  "--ring",
+  "--primary",
+  "--focus",
+];
+
+function normalizeHexColor(hex: string): string {
+  return hex.startsWith("#") ? hex : `#${hex}`;
+}
+
+function hexToRgba(hex: string, alpha: number): string {
+  const normalized = normalizeHexColor(hex);
+  if (normalized.length !== 7) {
+    return "";
+  }
+  const r = Number.parseInt(normalized.slice(1, 3), 16);
+  const g = Number.parseInt(normalized.slice(3, 5), 16);
+  const b = Number.parseInt(normalized.slice(5, 7), 16);
+  if (Number.isNaN(r) || Number.isNaN(g) || Number.isNaN(b)) {
+    return "";
+  }
+  return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+}
+
+function applySeamColor(seamColor: string | null | undefined) {
+  const root = document.documentElement.style;
+  if (!seamColor) {
+    for (const v of SEAM_COLOR_CSS_VARS) {
+      root.removeProperty(v);
+    }
+    return;
+  }
+  const normalized = normalizeHexColor(seamColor);
+  root.setProperty("--accent", normalized);
+  root.setProperty("--accent-hover", `color-mix(in srgb, ${normalized}, white 15%)`);
+  root.setProperty("--accent-muted", normalized);
+  root.setProperty("--accent-subtle", hexToRgba(normalized, 0.1));
+  root.setProperty("--accent-glow", hexToRgba(normalized, 0.2));
+  root.setProperty("--ring", normalized);
+  root.setProperty("--primary", normalized);
+  root.setProperty("--focus", normalized);
 }
 
 export async function loadControlUiBootstrapConfig(
@@ -136,6 +185,8 @@ export async function loadControlUiBootstrapConfig(
       typeof parsed.chatMessageMaxWidth === "string" && parsed.chatMessageMaxWidth.trim()
         ? parsed.chatMessageMaxWidth
         : null;
+    state.seamColor = typeof parsed.seamColor === "string" ? parsed.seamColor : null;
+    applySeamColor(state.seamColor);
   } catch {
     // Ignore bootstrap failures; UI will update identity after connecting.
   }
