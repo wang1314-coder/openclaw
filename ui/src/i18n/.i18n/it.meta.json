@@ -2,6 +2,7 @@
   "fallbackKeys": [
     "cron.jobDetail.command",
     "cron.jobDetail.cwd",
+    "sessionsView.statusPaused",
     "skillWorkshop.header.useCurrentChat",
     "skillWorkshop.header.useCurrentChatAria",
     "skillWorkshop.header.useCurrentChatTooltip",
@@ -34,12 +35,12 @@
     "workboard.unknownStatus",
     "workboard.viewDetails"
   ],
-  "generatedAt": "2026-06-10T18:02:12.038Z",
+  "generatedAt": "2026-06-11T13:45:19.821Z",
   "locale": "it",
   "model": "claude-opus-4-8",
   "provider": "anthropic",
-  "sourceHash": "d31dac3a16f784afca7d2c01a614ceeb2d90bb455a67114a0830a3c045210715",
-  "totalKeys": 1335,
+  "sourceHash": "b3eb69e1dd198082e4c01af24b6c4dc17e8079010f629c8e78ff4ee79d759266",
+  "totalKeys": 1336,
   "translatedKeys": 1302,
   "workflow": 1
 }
