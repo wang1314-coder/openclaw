@@ -5065,6 +5065,158 @@ describe("QmdMemoryManager", () => {
     }
   });
 
+  it("persists session-export state and reloads it across restarts", async () => {
+    const sessionsDir = path.join(stateDir, "agents", agentId, "sessions");
+    await fs.mkdir(sessionsDir, { recursive: true });
+    const sessionFile = path.join(sessionsDir, "session-1.jsonl");
+    const exportDir = path.join(stateDir, "agents", agentId, "qmd", "sessions");
+    const exportFile = path.join(exportDir, "session-1.md");
+    await fs.writeFile(
+      sessionFile,
+      '{"type":"message","message":{"role":"user","content":"hello"}}\n',
+      "utf-8",
+    );
+
+    const currentMemory = cfg.memory;
+    cfg = {
+      ...cfg,
+      memory: {
+        ...currentMemory,
+        qmd: {
+          ...currentMemory?.qmd,
+          sessions: { enabled: true },
+        },
+      },
+    } as OpenClawConfig;
+
+    // First boot: sync should write export markdown and persist cache to SQLite.
+    const first = await createManager();
+    try {
+      await first.manager.sync({ reason: "manual" });
+      const firstExport = await fs.readFile(exportFile, "utf-8");
+      expect(firstExport).toContain("hello");
+    } finally {
+      await first.manager.close();
+    }
+
+    // Capture the export markdown's mtime so we can verify the second boot's
+    // sync did NOT rewrite it (SQLite fast path takes effect).
+    const writtenStat = await fs.stat(exportFile);
+
+    // Second boot, same input files: SQLite cache read + stat fast path should
+    // skip the write entirely.
+    const second = await createManager();
+    try {
+      await second.manager.sync({ reason: "manual" });
+      const secondStat = await fs.stat(exportFile);
+      expect(secondStat.mtimeMs).toBe(writtenStat.mtimeMs);
+      expect(secondStat.size).toBe(writtenStat.size);
+    } finally {
+      await second.manager.close();
+    }
+  });
+
+  it("ignores stale cache entries scoped to a different exportDir", async () => {
+    const sessionsDir = path.join(stateDir, "agents", agentId, "sessions");
+    await fs.mkdir(sessionsDir, { recursive: true });
+    const sessionFile = path.join(sessionsDir, "session-1.jsonl");
+    const exportDir = path.join(stateDir, "agents", agentId, "qmd", "sessions");
+    const exportFile = path.join(exportDir, "session-1.md");
+    await fs.writeFile(
+      sessionFile,
+      '{"type":"message","message":{"role":"user","content":"hello"}}\n',
+      "utf-8",
+    );
+
+    const currentMemory = cfg.memory;
+    cfg = {
+      ...cfg,
+      memory: {
+        ...currentMemory,
+        qmd: {
+          ...currentMemory?.qmd,
+          sessions: { enabled: true },
+        },
+      },
+    } as OpenClawConfig;
+
+    // First sync: exports the markdown and writes a SQLite cache entry for exportDir.
+    const first = await createManager();
+    try {
+      await first.manager.sync({ reason: "manual" });
+      expect(await fs.readFile(exportFile, "utf-8")).toContain("hello");
+    } finally {
+      await first.manager.close();
+    }
+
+    // Delete the markdown. On the next sync the cache entry for exportDir still
+    // exists, but because the target is missing the fast path falls through and
+    // rebuilds. This verifies cache scoping by (session_file, export_dir, render_version).
+    await fs.rm(exportFile);
+
+    const second = await createManager();
+    try {
+      await second.manager.sync({ reason: "manual" });
+      // Markdown must be rebuilt even though the source jsonl is unchanged.
+      expect(await fs.readFile(exportFile, "utf-8")).toContain("hello");
+    } finally {
+      await second.manager.close();
+    }
+  });
+
+  it("rebuilds the session-export markdown when the cached target is missing", async () => {
+    const sessionsDir = path.join(stateDir, "agents", agentId, "sessions");
+    await fs.mkdir(sessionsDir, { recursive: true });
+    const sessionFile = path.join(sessionsDir, "session-1.jsonl");
+    const exportDir = path.join(stateDir, "agents", agentId, "qmd", "sessions");
+    const exportFile = path.join(exportDir, "session-1.md");
+    await fs.writeFile(
+      sessionFile,
+      '{"type":"message","message":{"role":"user","content":"hello"}}\n',
+      "utf-8",
+    );
+
+    const currentMemory = cfg.memory;
+    cfg = {
+      ...cfg,
+      memory: {
+        ...currentMemory,
+        qmd: {
+          ...currentMemory?.qmd,
+          sessions: { enabled: true },
+        },
+      },
+    } as OpenClawConfig;
+
+    // First boot writes the markdown and persists the export-state cache.
+    const first = await createManager();
+    try {
+      await first.manager.sync({ reason: "manual" });
+      const firstExport = await fs.readFile(exportFile, "utf-8");
+      expect(firstExport).toContain("hello");
+    } finally {
+      await first.manager.close();
+    }
+
+    // Simulate the export markdown being deleted out from under us while
+    // the source jsonl (and the .export-state.json cache entry pointing
+    // at it) remain intact.
+    await fs.rm(exportFile);
+    await expect(fs.access(exportFile)).rejects.toThrow();
+
+    // Second boot: cache says "size+mtime match, target=session-1.md", but
+    // the target is missing. The fast path must fall through to the slow
+    // rebuild path so the markdown is regenerated.
+    const second = await createManager();
+    try {
+      await second.manager.sync({ reason: "manual" });
+      const rebuilt = await fs.readFile(exportFile, "utf-8");
+      expect(rebuilt).toContain("hello");
+    } finally {
+      await second.manager.close();
+    }
+  });
+
   it("fails closed when sqlite index is busy during doc lookup or search", async () => {
     const cases = [
       {
