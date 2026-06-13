@@ -194,9 +194,11 @@ const CAPABILITY_METADATA: CapabilityMetadata[] = [
   },
   {
     id: "image.generate",
-    description: "Generate raster images with configured image providers.",
+    description:
+      "Generate raster images with configured image providers. Use --file to delegate to the image.edit pipeline for input-image operations.",
     transports: ["local"],
     flags: [
+      "--file",
       "--prompt",
       "--model",
       "--count",
@@ -2230,15 +2232,35 @@ export function registerCapabilityCli(program: Command) {
     .option("--background <value>", "Background hint: transparent, opaque, or auto")
     .option("--openai-background <value>", "OpenAI background hint: transparent, opaque, or auto")
     .option("--timeout-ms <ms>", "Provider request timeout in milliseconds")
+    .option(
+      "--file <path>",
+      "Input file (delegates to the canonical image.edit pipeline)",
+      collectOption,
+      [],
+    )
     .option("--output <path>", "Output path")
     .option("--json", "Output JSON", false)
     .action(async (opts) => {
       await runCommandWithRuntime(defaultRuntime, async () => {
+        const files = Array.isArray(opts.file) ? (opts.file as string[]) : [];
+        const hasFiles = files.length > 0;
+        // --file routes through the canonical image.edit pipeline so that
+        // input-image behavior, capability identity, metadata, and provider
+        // checks stay consistent with the documented edit route.
+        const resolvedCapability = hasFiles ? "image.edit" : "image.generate";
+        // --count is an image.generate-only option. Reject it explicitly when
+        // combined with --file so the user gets a clear error instead of
+        // silent discard.
+        if (hasFiles && opts.count !== undefined) {
+          throw new Error(
+            "--count is not supported with --file; use image generate without --file for multi-output text-to-image, or remove --count for input-image operations",
+          );
+        }
         const result = await runImageGenerate({
-          capability: "image.generate",
+          capability: resolvedCapability,
           prompt: String(opts.prompt),
           model: opts.model as string | undefined,
-          count: parseOptionalPositiveInteger(opts.count, "--count"),
+          count: hasFiles ? undefined : parseOptionalPositiveInteger(opts.count, "--count"),
           size: opts.size as string | undefined,
           aspectRatio: opts.aspectRatio as string | undefined,
           resolution: opts.resolution as "1K" | "2K" | "4K" | undefined,
@@ -2248,6 +2270,7 @@ export function registerCapabilityCli(program: Command) {
             opts.openaiBackground as string | undefined,
             "--openai-background",
           ),
+          file: hasFiles ? files : undefined,
           timeoutMs: parseOptionalTimeoutMs(opts.timeoutMs),
           output: opts.output as string | undefined,
         });

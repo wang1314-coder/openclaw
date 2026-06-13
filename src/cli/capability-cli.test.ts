@@ -1930,6 +1930,73 @@ describe("capability cli", () => {
     expect(mocks.generateImage).not.toHaveBeenCalled();
   });
 
+  it("forwards --file from image generate to the canonical image.edit pipeline", async () => {
+    const inputPath = path.join(os.tmpdir(), `openclaw-image-gen-input-${Date.now()}.png`);
+    await fs.writeFile(inputPath, Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]));
+
+    mocks.generateImage.mockResolvedValue({
+      provider: "openai",
+      model: "gpt-image-1",
+      attempts: [],
+      images: [],
+    });
+
+    try {
+      await runRegisteredCli({
+        register: registerCapabilityCli as (program: Command) => void,
+        argv: [
+          "capability",
+          "image",
+          "generate",
+          "--prompt",
+          "branded cover",
+          "--file",
+          inputPath,
+          "--json",
+        ],
+      });
+    } finally {
+      await fs.unlink(inputPath).catch(() => undefined);
+    }
+
+    const call = firstImageGenerationCall();
+    const inputImages = call?.inputImages as Array<Record<string, unknown>>;
+    expect(call?.prompt).toBe("branded cover");
+    expect(inputImages).toHaveLength(1);
+    expect(inputImages[0]?.fileName).toBe(path.basename(inputPath));
+    // When --file is provided, image.generate delegates to the image.edit
+    // pipeline and --count is not forwarded (edit does not support count).
+    expect(call?.count).toBeUndefined();
+  });
+
+  it("rejects --count combined with --file on image generate", async () => {
+    const inputPath = path.join(os.tmpdir(), `openclaw-image-gen-count-${Date.now()}.png`);
+    await fs.writeFile(inputPath, Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]));
+
+    try {
+      await expect(
+        runRegisteredCli({
+          register: registerCapabilityCli as (program: Command) => void,
+          argv: [
+            "capability",
+            "image",
+            "generate",
+            "--prompt",
+            "branded cover",
+            "--file",
+            inputPath,
+            "--count",
+            "4",
+          ],
+        }),
+      ).rejects.toThrow("exit 1");
+    } finally {
+      await fs.unlink(inputPath).catch(() => undefined);
+    }
+
+    expectRuntimeErrorContains("--count is not supported with --file");
+  });
+
   it("rejects partial image generate timeout before provider dispatch", async () => {
     await expect(
       runRegisteredCli({
