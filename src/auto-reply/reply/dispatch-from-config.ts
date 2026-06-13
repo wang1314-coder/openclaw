@@ -2202,6 +2202,18 @@ export async function dispatchReplyFromConfig(
       const reply = resolveSendableOutboundReplyParts(payload);
       return !reply.hasMedia && !hasExecApprovalPayload(payload);
     };
+    const shouldSuppressDirectTextOnlyToolErrorProgress = (payload: ReplyPayload) => {
+      if (
+        ctx.ChatType !== "direct" ||
+        shouldEmitFullVerboseProgress() ||
+        payload.isError !== true ||
+        getReplyPayloadMetadata(payload)?.replaceableByTerminalToolErrorWarning !== true
+      ) {
+        return false;
+      }
+      const reply = resolveSendableOutboundReplyParts(payload);
+      return !reply.hasMedia && !hasExecApprovalPayload(payload);
+    };
     const sendFinalPayload = async (
       payload: ReplyPayload,
       options: { abortSignal?: AbortSignal } = {},
@@ -2805,6 +2817,9 @@ export async function dispatchReplyFromConfig(
                   return;
                 }
                 if (shouldSuppressMessageToolOnlyTextErrorProgress(deliveryPayload)) {
+                  return;
+                }
+                if (shouldSuppressDirectTextOnlyToolErrorProgress(deliveryPayload)) {
                   return;
                 }
                 if (shouldSuppressDefaultToolProgressMessages()) {
