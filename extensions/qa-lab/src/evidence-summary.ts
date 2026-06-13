@@ -11,7 +11,6 @@ const qaEvidenceStatusSchema = z.enum(["pass", "fail", "blocked", "skipped"]);
 const nonEmptyStringSchema = z.string().trim().min(1);
 const nullableStringSchema = nonEmptyStringSchema.nullable();
 const qaEvidenceProfileIdSchema = nonEmptyStringSchema;
-const qaEvidenceIdSchema = z.object({ id: nonEmptyStringSchema });
 
 const qaEvidenceProviderSchema = z
   .object({
@@ -93,8 +92,9 @@ const qaEvidenceRefSchema = z
   })
   .strict();
 
-const qaEvidenceCoverageSchema = qaEvidenceIdSchema
-  .extend({
+const qaEvidenceCoverageSchema = z
+  .object({
+    coverageId: nonEmptyStringSchema,
     role: nonEmptyStringSchema,
     surfaceIds: z.array(nonEmptyStringSchema),
     categoryIds: z.array(nonEmptyStringSchema),
@@ -262,22 +262,26 @@ function buildQaEvidenceRefs(params: {
 }
 
 function buildQaEvidenceCoverage(params: {
-  primaryIds?: readonly string[];
-  secondaryIds?: readonly string[];
+  primaryCoverageIds?: readonly string[];
+  secondaryCoverageIds?: readonly string[];
   surfaceIds?: readonly string[];
   categoryIds?: readonly string[];
 }) {
   const surfaceIds = uniqueSortedStrings(params.surfaceIds ?? []);
   const categoryIds = uniqueSortedStrings(params.categoryIds ?? []);
-  const buildCoverage = (id: string, role: "primary" | "secondary") => ({
-    id,
+  const buildCoverage = (coverageId: string, role: "primary" | "secondary") => ({
+    coverageId,
     role,
     surfaceIds,
     categoryIds: role === "primary" ? categoryIds : [],
   });
   return [
-    ...uniqueSortedStrings(params.primaryIds ?? []).map((id) => buildCoverage(id, "primary")),
-    ...uniqueSortedStrings(params.secondaryIds ?? []).map((id) => buildCoverage(id, "secondary")),
+    ...uniqueSortedStrings(params.primaryCoverageIds ?? []).map((coverageId) =>
+      buildCoverage(coverageId, "primary"),
+    ),
+    ...uniqueSortedStrings(params.secondaryCoverageIds ?? []).map((coverageId) =>
+      buildCoverage(coverageId, "secondary"),
+    ),
   ];
 }
 
@@ -301,6 +305,12 @@ function uniqueSortedStrings(values: readonly (string | undefined)[]) {
   return [...new Set(values.map((value) => value?.trim()).filter(Boolean) as string[])].toSorted(
     (left, right) => left.localeCompare(right),
   );
+}
+
+function taxonomyCategoryIdsFromCoverageIds(coverageIds: readonly string[]) {
+  return coverageIds
+    .map((coverageId) => coverageId.split(".").slice(0, -1).join("."))
+    .filter(Boolean);
 }
 
 function resolveQaEvidenceProfile(params: {
@@ -505,12 +515,15 @@ export function buildQaSuiteEvidenceSummary(
       mapping: {
         profile,
         coverage: buildQaEvidenceCoverage({
-          primaryIds: primaryCoverageIds,
-          secondaryIds: coverageIds.filter(
+          primaryCoverageIds,
+          secondaryCoverageIds: coverageIds.filter(
             (coverageId) => !primaryCoverageIds.includes(coverageId),
           ),
           surfaceIds,
-          categoryIds: uniqueSortedStrings([scenario?.category, ...primaryCoverageIds]),
+          categoryIds: uniqueSortedStrings([
+            scenario?.category,
+            ...taxonomyCategoryIdsFromCoverageIds(primaryCoverageIds),
+          ]),
         }),
         refs: refs.length > 0 ? refs : undefined,
         runtimeParityTier,
@@ -578,7 +591,7 @@ function buildTestRunnerEvidenceSummary(
       mapping: {
         profile,
         coverage: buildQaEvidenceCoverage({
-          primaryIds: target?.coverageIds ?? [],
+          primaryCoverageIds: target?.coverageIds ?? [],
           surfaceIds: target?.surfaceIds ?? [],
           categoryIds: target?.categoryIds ?? [],
         }),
@@ -651,7 +664,7 @@ export function buildLiveTransportEvidenceSummary(
       : undefined;
     const coverage = [
       {
-        id: `channels.${params.transportId}.live`,
+        coverageId: `channels.${params.transportId}.live`,
         role: "live-transport",
         surfaceIds: [`channels.${params.transportId}`],
         categoryIds: [`channels.${params.transportId}.live`],
@@ -659,7 +672,7 @@ export function buildLiveTransportEvidenceSummary(
     ];
     if (standardCoverageId) {
       coverage.push({
-        id: standardCoverageId,
+        coverageId: standardCoverageId,
         role: "live-transport-standard",
         surfaceIds: [`channels.${params.transportId}`],
         categoryIds: [`channels.${params.transportId}.live`],
