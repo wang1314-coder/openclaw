@@ -233,6 +233,7 @@ export type ResolvedRequestAuth =
       ok: true;
       apiKey?: string;
       headers?: Record<string, string>;
+      authMode?: "aws-sdk";
     }
   | {
       ok: false;
@@ -681,6 +682,7 @@ export class ModelRegistry {
         ok: true,
         apiKey,
         headers: headers && Object.keys(headers).length > 0 ? headers : undefined,
+        ...(usesAwsSdkAuth ? { authMode: "aws-sdk" as const } : {}),
       };
     } catch (error) {
       return {
