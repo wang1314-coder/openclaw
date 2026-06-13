@@ -11,6 +11,19 @@ vi.mock("../../auto-reply/thinking.js", () => ({
   resolveThinkingDefaultForModel: thinkingMocks.resolveThinkingDefaultForModel,
 }));
 import type { Model } from "../../llm/types.js";
+
+const streamSimpleCalls: Array<Record<string, unknown>> = [];
+vi.mock("../../llm/stream.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../llm/stream.js")>();
+  return {
+    ...actual,
+    streamSimple: (_model: unknown, _context: unknown, options: Record<string, unknown>) => {
+      streamSimpleCalls.push(options);
+      return (async function* () {})();
+    },
+  };
+});
+
 import { AuthStorage } from "./auth-storage.js";
 import { createExtensionRuntime } from "./extensions/loader.js";
 import type { LoadExtensionsResult, ToolDefinition } from "./extensions/types.js";
@@ -322,6 +335,47 @@ describe("createAgentSession tool defaults", () => {
     });
 
     expect(events).toEqual(["lock:start", "lock:end"]);
+  });
+
+  it("forwards the configured provider maxRetries through the SDK request options", async () => {
+    streamSimpleCalls.length = 0;
+    const { session } = await createAgentSession({
+      model: testModel,
+      resourceLoader: createEmptyResourceLoader(),
+      sessionManager: SessionManager.inMemory(),
+      settingsManager: SettingsManager.inMemory({
+        retry: { provider: { maxRetries: 3 } },
+      }),
+      modelRegistry: ModelRegistry.inMemory(AuthStorage.inMemory()),
+    });
+
+    // No per-call maxRetries: the SDK seam falls back to the configured provider setting.
+    await session.agent.streamFn(testModel, { systemPrompt: "", messages: [], tools: [] });
+
+    expect(streamSimpleCalls).toHaveLength(1);
+    expect(streamSimpleCalls[0]?.maxRetries).toBe(3);
+  });
+
+  it("lets an explicit per-call maxRetries override the configured provider setting", async () => {
+    streamSimpleCalls.length = 0;
+    const { session } = await createAgentSession({
+      model: testModel,
+      resourceLoader: createEmptyResourceLoader(),
+      sessionManager: SessionManager.inMemory(),
+      settingsManager: SettingsManager.inMemory({
+        retry: { provider: { maxRetries: 3 } },
+      }),
+      modelRegistry: ModelRegistry.inMemory(AuthStorage.inMemory()),
+    });
+
+    await session.agent.streamFn(
+      testModel,
+      { systemPrompt: "", messages: [], tools: [] },
+      { maxRetries: 1 },
+    );
+
+    expect(streamSimpleCalls).toHaveLength(1);
+    expect(streamSimpleCalls[0]?.maxRetries).toBe(1);
   });
 });
 
