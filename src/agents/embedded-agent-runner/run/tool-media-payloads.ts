@@ -37,11 +37,14 @@ export function mergeAttemptToolMediaPayloads(params: {
     const payload = payloads[payloadIndex];
     if (
       params.sourceReplyDeliveryMode === "message_tool_only" &&
-      getReplyPayloadMetadata(payload)?.sourceReplyTranscriptMirror
+      getReplyPayloadMetadata(payload)?.sourceReplyTranscriptMirror &&
+      !params.toolTrustedLocalMedia
     ) {
       // Message-tool-only source replies are transcript mirrors of a send that
       // already happened elsewhere; attaching generated media here would create
-      // a duplicate channel delivery.
+      // a duplicate channel delivery. Trusted local media (e.g. agent-generated
+      // TTS audio) should still be delivered - it represents new content created
+      // by the agent, not a mirror of an external send.
       return payloads;
     }
     const mergedMediaUrls = Array.from(new Set([...(payload.mediaUrls ?? []), ...mediaUrls]));
