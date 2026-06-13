@@ -13,6 +13,7 @@ import {
 } from "../agents/agent-scope.js";
 import { runEmbeddedAgent } from "../agents/embedded-agent.js";
 import { resolveDefaultModelForAgent } from "../agents/model-selection.js";
+import { splitModelRef } from "../agents/subagent-spawn-plan.js";
 import { resolveAgentTimeoutMs } from "../agents/timeout.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import { createSubsystemLogger } from "../logging/subsystem.js";
@@ -34,6 +35,7 @@ function resolveSlugGeneratorTimeoutMs(cfg: OpenClawConfig): number {
 export async function generateSlugViaLLM(params: {
   sessionContent: string;
   cfg: OpenClawConfig;
+  model?: string;
 }): Promise<string | null> {
   let tempSessionFile: string | null = null;
 
@@ -53,10 +55,12 @@ ${params.sessionContent.slice(0, 2000)}
 
 Reply with ONLY the slug, nothing else. Examples: "vendor-pitch", "api-design", "bug-fix"`;
 
-    const { provider, model } = resolveDefaultModelForAgent({
-      cfg: params.cfg,
-      agentId,
-    });
+    const { provider, model } = params.model
+      ? splitModelRef(params.model)
+      : resolveDefaultModelForAgent({
+          cfg: params.cfg,
+          agentId,
+        });
     const timeoutMs = resolveSlugGeneratorTimeoutMs(params.cfg);
 
     const result = await runEmbeddedAgent({
