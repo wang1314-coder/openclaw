@@ -59,6 +59,7 @@ export type SkillStatusEntry = {
   disabled: boolean;
   blockedByAllowlist: boolean;
   blockedByAgentFilter: boolean;
+  blockedByPlatform: boolean;
   eligible: boolean;
   modelVisible: boolean;
   userInvocable: boolean;
@@ -279,6 +280,7 @@ function buildSkillStatus(
       isEnvSatisfied,
       isConfigSatisfied,
     });
+  const blockedByPlatform = missing.os.length > 0;
   const eligible = !disabled && !blockedByAllowlist && requirementsSatisfied;
   const availableToAgent = eligible && !blockedByAgentFilter;
   const userInvocable = indexed.userInvocable;
@@ -309,6 +311,7 @@ function buildSkillStatus(
     disabled,
     blockedByAllowlist,
     blockedByAgentFilter,
+    blockedByPlatform,
     eligible,
     modelVisible: availableToAgent && indexed.promptVisible,
     userInvocable,
