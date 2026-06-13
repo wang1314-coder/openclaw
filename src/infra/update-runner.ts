@@ -13,6 +13,7 @@ import {
   resolveControlUiDistIndexPathForRoot,
 } from "./control-ui-assets.js";
 import { readPackageName, readPackageVersion } from "./package-json.js";
+import type { LocalPackageOverridesResult } from "./package-local-overrides.js";
 import { normalizePackageTagInput } from "./package-tag.js";
 import { runGlobalPackageUpdateSteps } from "./package-update-steps.js";
 import { trimLogTail } from "./restart-sentinel.js";
@@ -59,6 +60,7 @@ export type UpdateRunResult = {
   reason?: string;
   before?: { sha?: string | null; version?: string | null };
   after?: { sha?: string | null; version?: string | null };
+  localOverrides?: LocalPackageOverridesResult;
   steps: UpdateStepResult[];
   durationMs: number;
   postUpdate?: {
@@ -140,6 +142,7 @@ type UpdateRunnerOptions = {
   channel?: UpdateChannel;
   devTargetRef?: string;
   deferConfiguredPluginInstallRepair?: boolean;
+  reapplyLocalOverrides?: boolean;
   beforeGitMutation?: () => Promise<void>;
   timeoutMs?: number;
   runCommand?: CommandRunner;
@@ -1658,6 +1661,7 @@ export async function runGatewayUpdate(opts: UpdateRunnerOptions = {}): Promise<
       packageRoot: pkgRoot,
       runCommand,
       timeoutMs,
+      reapplyLocalOverrides: opts.reapplyLocalOverrides === true,
       ...(globalInstallEnv === undefined ? {} : { env: globalInstallEnv }),
       installCwd: pkgRoot,
       runStep: (stepParams) =>
@@ -1704,6 +1708,7 @@ export async function runGatewayUpdate(opts: UpdateRunnerOptions = {}): Promise<
         : undefined,
       before: { version: beforeVersion },
       after: { version: packageUpdate.afterVersion },
+      localOverrides: packageUpdate.localOverrides,
       steps: packageUpdate.steps,
       durationMs: Date.now() - startedAt,
     };

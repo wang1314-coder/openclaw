@@ -3,7 +3,14 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { pathExists } from "./fs-safe.js";
+import { collectPackageDistContentInventoryErrors } from "./package-dist-inventory.js";
 import { readPackageVersion } from "./package-json.js";
+import {
+  applyLocalPackageOverrides,
+  captureLocalPackageOverrides,
+  type LocalPackageOverridesPlan,
+  type LocalPackageOverridesResult,
+} from "./package-local-overrides.js";
 import { movePathWithCopyFallback } from "./replace-file.js";
 import {
   collectInstalledGlobalPackageErrors,
@@ -319,6 +326,66 @@ async function cleanupStagedNpmInstall(stage: StagedNpmInstall | null): Promise<
   await removePathBestEffort(stage.prefix);
 }
 
+function pushLocalOverridesStep(params: {
+  steps: PackageUpdateStepResult[];
+  packageRoot: string;
+  localOverrides: LocalPackageOverridesResult;
+}): void {
+  if (params.localOverrides.status === "none") {
+    return;
+  }
+  const diagnosticLines = [
+    params.localOverrides.recoveryDir
+      ? `preserved local override recovery bundle: ${params.localOverrides.recoveryDir}`
+      : null,
+    ...params.localOverrides.warnings,
+    ...params.localOverrides.conflicts.map((conflict) => `${conflict.path}: ${conflict.reason}`),
+  ].filter((line): line is string => Boolean(line));
+  params.steps.push({
+    name: "local overrides",
+    command: `reapply local OpenClaw changes in ${params.packageRoot}`,
+    cwd: params.packageRoot,
+    durationMs: 0,
+    exitCode: params.localOverrides.status === "error" ? 1 : 0,
+    stdoutTail:
+      params.localOverrides.status === "applied"
+        ? `reapplied ${params.localOverrides.applied} local override(s)`
+        : null,
+    stderrTail: diagnosticLines.length > 0 ? diagnosticLines.join("\n") : null,
+  });
+}
+
+function unsupportedLocalOverridesResult(message: string): LocalPackageOverridesResult {
+  return {
+    status: "unsupported",
+    added: 0,
+    modified: 0,
+    deleted: 0,
+    applied: 0,
+    conflicts: [],
+    warnings: [message],
+  };
+}
+
+async function captureLocalPackageOverridesForUpdate(packageRoot: string): Promise<{
+  plan: LocalPackageOverridesPlan | null;
+  unsupported: LocalPackageOverridesResult | null;
+}> {
+  try {
+    return {
+      plan: await captureLocalPackageOverrides({ packageRoot }),
+      unsupported: null,
+    };
+  } catch (error) {
+    return {
+      plan: null,
+      unsupported: unsupportedLocalOverridesResult(
+        `Local OpenClaw changes could not be inspected before update and were not preserved: ${formatError(error)}`,
+      ),
+    };
+  }
+}
+
 async function copyPathEntry(source: string, destination: string): Promise<void> {
   const stat = await fs.lstat(source);
   await removePathBestEffort(destination);
@@ -505,17 +572,20 @@ export async function runGlobalPackageUpdateSteps(params: {
   timeoutMs: number;
   env?: NodeJS.ProcessEnv;
   installCwd?: string;
+  reapplyLocalOverrides?: boolean;
   postVerifyStep?: (packageRoot: string) => Promise<PackageUpdateStepResult | null>;
 }): Promise<{
   steps: PackageUpdateStepResult[];
   verifiedPackageRoot: string | null;
   afterVersion: string | null;
   failedStep: PackageUpdateStepResult | null;
+  localOverrides?: LocalPackageOverridesResult;
 }> {
   const installCwd = params.installCwd === undefined ? {} : { cwd: params.installCwd };
   const installEnv = params.env === undefined ? {} : { env: params.env };
   let stagedInstall: StagedNpmInstall | null | undefined;
   let packedInstallDir: string | null = null;
+  let localOverrides: LocalPackageOverridesResult | undefined;
 
   try {
     const preparedInstall = await prepareStagedNpmInstall(params.installTarget, params.packageName);
@@ -531,6 +601,26 @@ export async function runGlobalPackageUpdateSteps(params: {
 
     const steps: PackageUpdateStepResult[] = [];
     const installCommandTarget = stagedInstall?.installTarget ?? params.installTarget;
+    const preUpdateLivePackageRoot = !stagedInstall
+      ? (params.installTarget.packageRoot ??
+        params.packageRoot ??
+        (
+          await resolveGlobalInstallTarget({
+            manager: params.installTarget,
+            runCommand: params.runCommand,
+            timeoutMs: params.timeoutMs,
+          })
+        ).packageRoot ??
+        null)
+      : null;
+    let preUpdateLocalOverridesPlan: LocalPackageOverridesPlan | null = null;
+    let preUpdateLocalOverridesUnsupported: LocalPackageOverridesResult | null = null;
+    if (preUpdateLivePackageRoot) {
+      const capturedLocalOverrides =
+        await captureLocalPackageOverridesForUpdate(preUpdateLivePackageRoot);
+      preUpdateLocalOverridesPlan = capturedLocalOverrides.plan;
+      preUpdateLocalOverridesUnsupported = capturedLocalOverrides.unsupported;
+    }
     const preparedSpec = await prepareNpmGitSourceInstallSpec({
       installTarget: installCommandTarget,
       installSpec: params.installSpec,
@@ -614,6 +704,7 @@ export async function runGlobalPackageUpdateSteps(params: {
     const livePackageRoot =
       params.installTarget.packageRoot ??
       params.packageRoot ??
+      preUpdateLivePackageRoot ??
       (
         await resolveGlobalInstallTarget({
           manager: params.installTarget,
@@ -624,6 +715,23 @@ export async function runGlobalPackageUpdateSteps(params: {
       null;
     const verificationPackageRoot = stagedInstall?.packageRoot ?? livePackageRoot;
     let verifiedPackageRoot = livePackageRoot ?? verificationPackageRoot;
+    const preservePreUpdateLocalOverrides = async () => {
+      if (localOverrides || !preUpdateLivePackageRoot) {
+        return;
+      }
+      localOverrides =
+        preUpdateLocalOverridesUnsupported ??
+        (await applyLocalPackageOverrides({
+          packageRoot: preUpdateLivePackageRoot,
+          plan: preUpdateLocalOverridesPlan,
+          reapply: false,
+        }));
+      pushLocalOverridesStep({
+        steps,
+        packageRoot: preUpdateLivePackageRoot,
+        localOverrides,
+      });
+    };
 
     let afterVersion: string | null = null;
     if (finalInstallStep.exitCode === 0 && verificationPackageRoot) {
@@ -639,6 +747,13 @@ export async function runGlobalPackageUpdateSteps(params: {
         packageRoot: verificationPackageRoot,
         expectedVersion,
       });
+      try {
+        verificationErrors.push(
+          ...(await collectPackageDistContentInventoryErrors(verificationPackageRoot)),
+        );
+      } catch (error) {
+        verificationErrors.push(formatError(error));
+      }
       if (verificationErrors.length > 0) {
         steps.push({
           name: "global install verify",
@@ -650,8 +765,21 @@ export async function runGlobalPackageUpdateSteps(params: {
           stdoutTail: null,
         });
       }
+      if (!stagedInstall && verificationErrors.length > 0 && livePackageRoot) {
+        localOverrides =
+          preUpdateLocalOverridesUnsupported ??
+          (await applyLocalPackageOverrides({
+            packageRoot: livePackageRoot,
+            plan: preUpdateLocalOverridesPlan,
+            reapply: false,
+          }));
+        pushLocalOverridesStep({ steps, packageRoot: livePackageRoot, localOverrides });
+      }
 
       if (stagedInstall && verificationErrors.length === 0) {
+        const capturedLocalOverrides = livePackageRoot
+          ? await captureLocalPackageOverridesForUpdate(livePackageRoot)
+          : { plan: null, unsupported: null };
         const swapStep = await swapStagedNpmInstall({
           stage: stagedInstall,
           installTarget: params.installTarget,
@@ -659,17 +787,35 @@ export async function runGlobalPackageUpdateSteps(params: {
         });
         steps.push(swapStep);
         if (swapStep.exitCode === 0) {
-          verifiedPackageRoot = params.installTarget.packageRoot ?? verifiedPackageRoot;
+          const activePackageRoot = params.installTarget.packageRoot ?? verifiedPackageRoot;
+          verifiedPackageRoot = activePackageRoot;
           afterVersion = candidateVersion;
+          if (activePackageRoot) {
+            localOverrides =
+              capturedLocalOverrides.unsupported ??
+              (await applyLocalPackageOverrides({
+                packageRoot: activePackageRoot,
+                plan: capturedLocalOverrides.plan,
+                reapply: params.reapplyLocalOverrides === true,
+              }));
+            pushLocalOverridesStep({ steps, packageRoot: activePackageRoot, localOverrides });
+          }
         }
+      } else if (!stagedInstall && verificationErrors.length === 0 && livePackageRoot) {
+        localOverrides =
+          preUpdateLocalOverridesUnsupported ??
+          (await applyLocalPackageOverrides({
+            packageRoot: livePackageRoot,
+            plan: preUpdateLocalOverridesPlan,
+            reapply: params.reapplyLocalOverrides === true,
+          }));
+        pushLocalOverridesStep({ steps, packageRoot: livePackageRoot, localOverrides });
       }
 
-      const failedVerifyOrSwap = steps.find(
-        (step) =>
-          (step.name === "global install verify" || step.name === "global install swap") &&
-          step.exitCode !== 0,
+      const failedPrePostVerifyStep = steps.find(
+        (step) => step !== updateStep && step.exitCode !== 0,
       );
-      const postVerifyStep = failedVerifyOrSwap
+      const postVerifyStep = failedPrePostVerifyStep
         ? null
         : verifiedPackageRoot
           ? await params.postVerifyStep?.(verifiedPackageRoot)
@@ -677,9 +823,17 @@ export async function runGlobalPackageUpdateSteps(params: {
       if (postVerifyStep) {
         steps.push(postVerifyStep);
       }
-      if (failedVerifyOrSwap && stagedInstall) {
+      if (
+        failedPrePostVerifyStep &&
+        stagedInstall &&
+        (failedPrePostVerifyStep.name === "global install verify" ||
+          failedPrePostVerifyStep.name === "global install swap")
+      ) {
         afterVersion = await readPackageVersionIfPresent(livePackageRoot);
       }
+    }
+    if (finalInstallStep.exitCode !== 0) {
+      await preservePreUpdateLocalOverrides();
     }
 
     const failedStep =
@@ -692,6 +846,7 @@ export async function runGlobalPackageUpdateSteps(params: {
       verifiedPackageRoot,
       afterVersion,
       failedStep,
+      localOverrides,
     };
   } finally {
     await cleanupStagedNpmInstall(stagedInstall ?? null);

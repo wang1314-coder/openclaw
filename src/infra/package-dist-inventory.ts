@@ -1,13 +1,17 @@
 // Collects and verifies package dist inventory metadata.
+import { createHash } from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { sortUniqueStrings } from "@openclaw/normalization-core/string-normalization";
 import { isLocalBuildMetadataDistPath } from "../../scripts/lib/local-build-metadata-paths.mjs";
 import { readJsonIfExists, writeJson } from "./json-files.js";
+import { readPackageVersion } from "./package-json.js";
 
 export { LOCAL_BUILD_METADATA_DIST_PATHS } from "../../scripts/lib/local-build-metadata-paths.mjs";
 
 export const PACKAGE_DIST_INVENTORY_RELATIVE_PATH = "dist/postinstall-inventory.json";
+export const PACKAGE_DIST_CONTENT_INVENTORY_RELATIVE_PATH =
+  "dist/postinstall-content-inventory.json";
 const PACKAGE_DIST_INVENTORY_SCAN_CONCURRENCY = 32;
 const LEGACY_QA_CHANNEL_DIR = ["qa", "channel"].join("-");
 const LEGACY_QA_LAB_DIR = ["qa", "lab"].join("-");
@@ -81,6 +85,7 @@ const OMITTED_DIST_SUBTREE_PATTERNS = [
   new RegExp(`^dist/plugin-sdk/extensions/${LEGACY_QA_LAB_DIR}(?:/|$)`, "u"),
 ] as const;
 const INSTALL_STAGE_DEBRIS_DIR_PATTERN = /^\.openclaw-install-stage(?:-[^/]+)?$/iu;
+const LEGACY_CONTENT_INVENTORY_COMPAT_MAX = { year: 2026, month: 6, day: 5 };
 type ExternalizedBundledExtensionIds = ReadonlySet<string>;
 type PackageDistExclusionRules = {
   files: ReadonlySet<string>;
@@ -95,6 +100,13 @@ type PackageDistInventoryScanContext = {
   activeFsOps: number;
   fsConcurrency: number;
   waiters: Array<() => void>;
+};
+
+export type PackageDistContentInventoryEntry = {
+  path: string;
+  sha256: string;
+  mode: number;
+  size: number;
 };
 
 function createPackageDistInventoryScanContext(): PackageDistInventoryScanContext {
@@ -129,6 +141,36 @@ function normalizeRelativePath(value: string): string {
 
 function isInstallStageDirName(value: string): boolean {
   return INSTALL_STAGE_DEBRIS_DIR_PATTERN.test(value);
+}
+
+function parseCalver(version: string | null | undefined) {
+  const match = /^(\d{4})\.(\d{1,2})\.(\d{1,2})(?:[-+].*)?$/u.exec(version ?? "");
+  if (!match) {
+    return null;
+  }
+  return {
+    year: Number(match[1]),
+    month: Number(match[2]),
+    day: Number(match[3]),
+  };
+}
+
+function compareCalver(
+  left: { year: number; month: number; day: number },
+  right: { year: number; month: number; day: number },
+): number {
+  if (left.year !== right.year) {
+    return left.year - right.year;
+  }
+  if (left.month !== right.month) {
+    return left.month - right.month;
+  }
+  return left.day - right.day;
+}
+
+function isLegacyContentInventoryCompatVersion(version: string | null | undefined): boolean {
+  const parsed = parseCalver(version);
+  return parsed ? compareCalver(parsed, LEGACY_CONTENT_INVENTORY_COMPAT_MAX) <= 0 : false;
 }
 
 function splitRelativePath(relativePath: string): string[] {
@@ -297,6 +339,9 @@ function isPackagedDistPath(relativePath: string, rules: PackageDistInventoryRul
     return false;
   }
   if (relativePath === PACKAGE_DIST_INVENTORY_RELATIVE_PATH) {
+    return false;
+  }
+  if (relativePath === PACKAGE_DIST_CONTENT_INVENTORY_RELATIVE_PATH) {
     return false;
   }
   if (isLocalBuildMetadataDistPath(relativePath)) {
@@ -488,7 +533,42 @@ export async function writePackageDistInventory(packageRoot: string): Promise<st
   const inventory = sortUniqueStrings(await collectPackageDistInventory(packageRoot));
   const inventoryPath = path.join(packageRoot, PACKAGE_DIST_INVENTORY_RELATIVE_PATH);
   await writeJson(inventoryPath, inventory, { trailingNewline: true });
+  const contentInventory = await collectPackageDistContentInventory(packageRoot, inventory);
+  const contentInventoryPath = path.join(packageRoot, PACKAGE_DIST_CONTENT_INVENTORY_RELATIVE_PATH);
+  await writeJson(contentInventoryPath, contentInventory, { trailingNewline: true });
   return inventory;
+}
+
+async function hashFileSha256(filePath: string): Promise<string> {
+  const content = await fs.readFile(filePath);
+  return createHash("sha256").update(content).digest("hex");
+}
+
+function normalizeFileMode(mode: number): number {
+  return mode & 0o777;
+}
+
+export async function collectPackageDistContentInventory(
+  packageRoot: string,
+  inventory?: string[],
+): Promise<PackageDistContentInventoryEntry[]> {
+  const files = inventory ?? (await collectPackageDistInventory(packageRoot));
+  const entries = await Promise.all(
+    files.map(async (relativePath) => {
+      const absolutePath = path.join(packageRoot, relativePath);
+      const stats = await fs.lstat(absolutePath);
+      if (!stats.isFile() || stats.isSymbolicLink()) {
+        throw new Error(`Unsafe package dist path: ${relativePath}`);
+      }
+      return {
+        path: normalizeRelativePath(relativePath),
+        sha256: await hashFileSha256(absolutePath),
+        mode: normalizeFileMode(stats.mode),
+        size: stats.size,
+      } satisfies PackageDistContentInventoryEntry;
+    }),
+  );
+  return entries.toSorted((left, right) => left.path.localeCompare(right.path));
 }
 
 async function readPackageDistInventoryOptional(packageRoot: string): Promise<string[] | null> {
@@ -508,6 +588,75 @@ export async function readPackageDistInventoryIfPresent(
   packageRoot: string,
 ): Promise<string[] | null> {
   return await readPackageDistInventoryOptional(packageRoot);
+}
+
+function isPackageDistContentInventoryEntry(
+  value: unknown,
+): value is PackageDistContentInventoryEntry {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+  const entry = value as PackageDistContentInventoryEntry;
+  return (
+    typeof entry.path === "string" &&
+    typeof entry.sha256 === "string" &&
+    /^[a-f0-9]{64}$/u.test(entry.sha256) &&
+    Number.isInteger(entry.mode) &&
+    entry.mode >= 0 &&
+    Number.isInteger(entry.size) &&
+    entry.size >= 0
+  );
+}
+
+export async function readPackageDistContentInventoryIfPresent(
+  packageRoot: string,
+): Promise<PackageDistContentInventoryEntry[] | null> {
+  const inventoryPath = path.join(packageRoot, PACKAGE_DIST_CONTENT_INVENTORY_RELATIVE_PATH);
+  const parsed = await readJsonIfExists<unknown>(inventoryPath);
+  if (parsed === null) {
+    return null;
+  }
+  if (
+    !Array.isArray(parsed) ||
+    parsed.some((entry) => !isPackageDistContentInventoryEntry(entry))
+  ) {
+    throw new Error(
+      `Invalid package dist content inventory at ${PACKAGE_DIST_CONTENT_INVENTORY_RELATIVE_PATH}`,
+    );
+  }
+  return parsed
+    .map((entry) => ({
+      path: normalizeRelativePath(entry.path),
+      sha256: entry.sha256,
+      mode: normalizeFileMode(entry.mode),
+      size: entry.size,
+    }))
+    .toSorted((left, right) => left.path.localeCompare(right.path));
+}
+
+function formatContentInventoryEntry(entry: PackageDistContentInventoryEntry): string {
+  return `${entry.path}:${entry.sha256}:${entry.size}`;
+}
+
+export async function collectPackageDistContentInventoryErrors(
+  packageRoot: string,
+): Promise<string[]> {
+  const expectedFiles = await readPackageDistContentInventoryIfPresent(packageRoot);
+  if (expectedFiles === null) {
+    const packageVersion = await readPackageVersion(packageRoot);
+    return isLegacyContentInventoryCompatVersion(packageVersion)
+      ? []
+      : [`missing package dist content inventory ${PACKAGE_DIST_CONTENT_INVENTORY_RELATIVE_PATH}`];
+  }
+  const actualFiles = await collectPackageDistContentInventory(packageRoot);
+  const expected = expectedFiles.map(formatContentInventoryEntry);
+  const actual = actualFiles.map(formatContentInventoryEntry);
+  if (JSON.stringify(expected) === JSON.stringify(actual)) {
+    return [];
+  }
+  return [
+    `Invalid package dist content inventory at ${PACKAGE_DIST_CONTENT_INVENTORY_RELATIVE_PATH}: expected packaged file hashes to match current dist files.`,
+  ];
 }
 
 /** Compares recorded and current package dist inventory entries and returns human-readable errors. */

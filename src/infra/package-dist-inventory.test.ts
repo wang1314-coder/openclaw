@@ -6,11 +6,13 @@ import { withTempDir } from "../test-helpers/temp-dir.js";
 import {
   assertNoLegacyPluginDependencyStagingDebris,
   collectLegacyPluginDependencyStagingDebrisPaths,
+  collectPackageDistContentInventoryErrors,
   collectPackageDistInventoryErrors,
   LOCAL_BUILD_METADATA_DIST_PATHS,
   PACKAGE_DIST_INVENTORY_RELATIVE_PATH,
   collectPackageDistInventory,
   isLegacyPluginDependencyInstallStagePath,
+  readPackageDistContentInventoryIfPresent,
   writePackageDistInventory,
 } from "./package-dist-inventory.js";
 
@@ -38,6 +40,107 @@ describe("package dist inventory", () => {
         "unexpected packaged dist file dist/stale-CJUAgRQR.js",
       ]);
     });
+  });
+
+  it("writes content hashes beside the path inventory", async () => {
+    await withTempDir({ prefix: "openclaw-dist-content-inventory-" }, async (packageRoot) => {
+      const currentFile = path.join(packageRoot, "dist", "current.js");
+      await fs.mkdir(path.dirname(currentFile), { recursive: true });
+      await fs.writeFile(currentFile, "export const value = 1;\n", "utf8");
+
+      await writePackageDistInventory(packageRoot);
+
+      const contentInventory = await readPackageDistContentInventoryIfPresent(packageRoot);
+      expect(contentInventory).toHaveLength(1);
+      expect(contentInventory?.[0]?.path).toBe("dist/current.js");
+      expect(contentInventory?.[0]?.sha256).toMatch(/^[a-f0-9]{64}$/u);
+      expect(contentInventory?.[0]?.size).toBe("export const value = 1;\n".length);
+    });
+  });
+
+  it("reports stale content hashes", async () => {
+    await withTempDir({ prefix: "openclaw-dist-content-inventory-stale-" }, async (packageRoot) => {
+      const currentFile = path.join(packageRoot, "dist", "current.js");
+      await fs.mkdir(path.dirname(currentFile), { recursive: true });
+      await fs.writeFile(currentFile, "export const value = 1;\n", "utf8");
+
+      await writePackageDistInventory(packageRoot);
+      await fs.writeFile(currentFile, "export const value = 2;\n", "utf8");
+
+      await expect(collectPackageDistContentInventoryErrors(packageRoot)).resolves.toEqual([
+        expect.stringContaining("Invalid package dist content inventory"),
+      ]);
+    });
+  });
+
+  it("does not treat mode-only content inventory differences as stale content", async () => {
+    await withTempDir({ prefix: "openclaw-dist-content-inventory-mode-" }, async (packageRoot) => {
+      const currentFile = path.join(packageRoot, "dist", "current.js");
+      await fs.mkdir(path.dirname(currentFile), { recursive: true });
+      await fs.writeFile(currentFile, "export const value = 1;\n", "utf8");
+
+      await writePackageDistInventory(packageRoot);
+      const contentInventory = await readPackageDistContentInventoryIfPresent(packageRoot);
+      expect(contentInventory).toHaveLength(1);
+      const contentInventoryPath = path.join(
+        packageRoot,
+        "dist",
+        "postinstall-content-inventory.json",
+      );
+      await fs.writeFile(
+        contentInventoryPath,
+        `${JSON.stringify([{ ...contentInventory?.[0], mode: 0 }], null, 2)}\n`,
+        "utf8",
+      );
+
+      await expect(collectPackageDistContentInventoryErrors(packageRoot)).resolves.toStrictEqual(
+        [],
+      );
+    });
+  });
+
+  it("requires content inventory for post-cutover package versions", async () => {
+    await withTempDir(
+      { prefix: "openclaw-dist-content-inventory-required-" },
+      async (packageRoot) => {
+        const currentFile = path.join(packageRoot, "dist", "current.js");
+        await fs.mkdir(path.dirname(currentFile), { recursive: true });
+        await fs.writeFile(currentFile, "export const value = 1;\n", "utf8");
+        await fs.writeFile(
+          path.join(packageRoot, "package.json"),
+          JSON.stringify({ name: "openclaw", version: "2026.6.6" }),
+          "utf8",
+        );
+        await writePackageDistInventory(packageRoot);
+        await fs.rm(path.join(packageRoot, "dist", "postinstall-content-inventory.json"));
+
+        await expect(collectPackageDistContentInventoryErrors(packageRoot)).resolves.toStrictEqual([
+          "missing package dist content inventory dist/postinstall-content-inventory.json",
+        ]);
+      },
+    );
+  });
+
+  it("allows already-published package versions without content inventory", async () => {
+    await withTempDir(
+      { prefix: "openclaw-dist-content-inventory-legacy-" },
+      async (packageRoot) => {
+        const currentFile = path.join(packageRoot, "dist", "current.js");
+        await fs.mkdir(path.dirname(currentFile), { recursive: true });
+        await fs.writeFile(currentFile, "export const value = 1;\n", "utf8");
+        await fs.writeFile(
+          path.join(packageRoot, "package.json"),
+          JSON.stringify({ name: "openclaw", version: "2026.6.5" }),
+          "utf8",
+        );
+        await writePackageDistInventory(packageRoot);
+        await fs.rm(path.join(packageRoot, "dist", "postinstall-content-inventory.json"));
+
+        await expect(collectPackageDistContentInventoryErrors(packageRoot)).resolves.toStrictEqual(
+          [],
+        );
+      },
+    );
   });
 
   it("keeps npm-omitted dist artifacts out of the inventory", async () => {

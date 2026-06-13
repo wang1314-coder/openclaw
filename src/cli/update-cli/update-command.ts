@@ -1495,6 +1495,7 @@ async function runPackageInstallUpdate(params: {
   invocationCwd?: string;
   honorPackageRoot?: boolean;
   nodeRunner?: string;
+  reapplyLocalOverrides?: boolean;
 }): Promise<UpdateRunResult> {
   const manager = await resolveGlobalManager({
     root: params.root,
@@ -1547,6 +1548,7 @@ async function runPackageInstallUpdate(params: {
     packageRoot: pkgRoot,
     runCommand,
     timeoutMs: params.timeoutMs,
+    reapplyLocalOverrides: params.reapplyLocalOverrides === true,
     ...(installEnv === undefined ? {} : { env: installEnv }),
     runStep: (stepParams) =>
       runUpdateStep({
@@ -1595,6 +1597,7 @@ async function runPackageInstallUpdate(params: {
     reason: packageUpdate.failedStep ? packageUpdate.failedStep.name : undefined,
     before: { version: beforeVersion },
     after: { version: packageUpdate.afterVersion ?? beforeVersion },
+    localOverrides: packageUpdate.localOverrides,
     steps: packageUpdate.steps,
     durationMs: Date.now() - params.startedAt,
   };
@@ -3561,6 +3564,7 @@ async function updateCommandInternal(opts: UpdateCommandOptions): Promise<void> 
             honorPackageRoot:
               managedServiceRootRedirect !== null || managedServiceNodeRunner !== undefined,
             nodeRunner: managedServiceNodeRunner,
+            reapplyLocalOverrides: opts.reapplyLocalOverrides === true,
           })
         : await runGitUpdate({
             root,
