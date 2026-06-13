@@ -726,12 +726,13 @@ export class OpenClawApp extends LitElement {
       }
     }
     if (e.key === "?" && !e.metaKey && !e.ctrlKey && !e.altKey) {
-      const target = e.target as HTMLElement;
+      const target = e.target instanceof HTMLElement ? e.target : null;
       const isTextEntry =
-        target.tagName === "INPUT" ||
-        target.tagName === "TEXTAREA" ||
-        target.tagName === "SELECT" ||
-        (target as HTMLElement).isContentEditable;
+        target !== null &&
+        (target.tagName === "INPUT" ||
+          target.tagName === "TEXTAREA" ||
+          target.tagName === "SELECT" ||
+          target.isContentEditable);
       if (!isTextEntry) {
         e.preventDefault();
         this.shortcutLegendOpen = !this.shortcutLegendOpen;

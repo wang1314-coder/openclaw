@@ -69,7 +69,8 @@ function renderGroup(group: ShortcutGroup) {
                 ${s.keys.map((k, i) =>
                   i === 0
                     ? renderKey(k)
-                    : html`<span class="shortcut-legend__plus" aria-hidden="true">+</span>${renderKey(k)}`,
+                    : html`<span class="shortcut-legend__plus" aria-hidden="true">+</span
+                        >${renderKey(k)}`,
                 )}
               </dt>
               <dd class="shortcut-legend__desc">${s.description}</dd>
@@ -153,7 +154,8 @@ export function renderShortcutLegend(props: ShortcutLegendProps) {
           <h2 class="shortcut-legend__title">Keyboard Shortcuts</h2>
           <button
             class="btn btn--icon shortcut-legend__close"
-            type="button" autofocus
+            type="button"
+            autofocus
             aria-label="Close keyboard shortcuts"
             @click=${() => props.onClose()}
           >
