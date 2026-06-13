@@ -38,8 +38,17 @@ jobs:
           OPENGREP_VERSION: v1.22.0
           OPENGREP_INSTALL_SHA: f458d7f0d52cc58eae1ca3cf3d5caf101e637519
         run: |
-          curl -fsSL "https://raw.githubusercontent.com/opengrep/opengrep/${OPENGREP_INSTALL_SHA}/install.sh" \
-            | bash -s -- -v "$OPENGREP_VERSION"
+          set -euo pipefail
+          installer_url="https://raw.githubusercontent.com/opengrep/opengrep/${OPENGREP_INSTALL_SHA}/install.sh"
+          for attempt in 1 2 3 4 5; do
+            if curl -fsSL "$installer_url" | bash -s -- -v "$OPENGREP_VERSION"; then
+              break
+            fi
+            if [ "$attempt" -eq 5 ]; then
+              exit 1
+            fi
+            sleep "$((attempt * 5))"
+          done
           echo "$HOME/.opengrep/cli/latest" >> "$GITHUB_PATH"
 
       - name: Verify opengrep
