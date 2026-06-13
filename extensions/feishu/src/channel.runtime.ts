@@ -23,6 +23,7 @@ import {
 import {
   editMessageFeishu as editMessageFeishuImpl,
   getMessageFeishu as getMessageFeishuImpl,
+  listFeishuChatMessages as listFeishuChatMessagesImpl,
   sendCardFeishu as sendCardFeishuImpl,
   sendMessageFeishu as sendMessageFeishuImpl,
 } from "./send.js";
@@ -43,6 +44,7 @@ export const feishuChannelRuntime = {
   getFeishuMemberInfo: getFeishuMemberInfoImpl,
   editMessageFeishu: editMessageFeishuImpl,
   getMessageFeishu: getMessageFeishuImpl,
+  listFeishuChatMessages: listFeishuChatMessagesImpl,
   sendCardFeishu: sendCardFeishuImpl,
   sendMessageFeishu: sendMessageFeishuImpl,
 };
