@@ -198,6 +198,14 @@ COPY --from=runtime-assets --chown=node:node /app/skills ./skills
 COPY --from=runtime-assets --chown=node:node /app/docs ./docs
 COPY --from=runtime-assets --chown=node:node /app/qa ./qa
 
+# Remove the extraneous nested openclaw copy shipped via extension
+# package.json pins. The published release inside node_modules is dead
+# weight — module resolution from plugin dirs resolves /app/dist instead.
+# Leaving it in the image (and its /app/node_modules/.bin/openclaw shim)
+# is a footgun: any downstream image that prepends node_modules/.bin to
+# PATH silently runs the OLD published version against current state.
+RUN rm -rf /app/node_modules/openclaw /app/node_modules/.bin/openclaw
+
 # Keep pnpm available in the runtime image for container-local workflows.
 # Use a shared Corepack home so the non-root `node` user does not need a
 # first-run network fetch when invoking pnpm.
